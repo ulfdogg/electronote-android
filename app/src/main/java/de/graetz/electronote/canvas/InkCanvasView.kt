@@ -83,6 +83,11 @@ class InkCanvasView @JvmOverloads constructor(
         invalidate()
     }
 
+    /** Dark paper, matching the iPad app's "Dunkles Papier" toggle. */
+    fun setDarkPaper(dark: Boolean) {
+        setBackgroundColor(if (dark) Color.parseColor("#1C1C1E") else Color.WHITE)
+    }
+
     fun setStrokes(newStrokes: List<Stroke>) {
         strokes.clear()
         strokes.addAll(newStrokes)

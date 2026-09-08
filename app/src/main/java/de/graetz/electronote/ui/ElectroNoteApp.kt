@@ -1,6 +1,6 @@
 package de.graetz.electronote.ui
 
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -10,12 +10,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import de.graetz.electronote.livecast.LiveCastServer
+import de.graetz.electronote.ui.theme.ElectroNoteTheme
 
 @Composable
 fun ElectroNoteApp() {
-    MaterialTheme {
+    val context = LocalContext.current
+    val systemDark = isSystemInDarkTheme()
+    LaunchedEffect(Unit) { AppPreferences.init(context, systemDark) }
+
+    ElectroNoteTheme(darkTheme = AppPreferences.isDarkMode) {
         Surface(modifier = Modifier) {
             var openDocumentId by remember { mutableStateOf<String?>(null) }
 

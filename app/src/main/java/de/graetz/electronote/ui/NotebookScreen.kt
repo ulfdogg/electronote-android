@@ -9,20 +9,26 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.IosShare
-import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SmartToy
@@ -72,6 +78,8 @@ import de.graetz.electronote.media.PhotoImporter
 import de.graetz.electronote.ocr.HandwritingRecognizer
 import de.graetz.electronote.pdf.PdfExporter
 import de.graetz.electronote.pdf.PdfImporter
+import de.graetz.electronote.ui.theme.ActionPill
+import de.graetz.electronote.ui.theme.IosColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -132,6 +140,10 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             loadPageIntoCanvas(loaded, 0)
         }
         isLoading = false
+    }
+
+    LaunchedEffect(AppPreferences.isDarkMode) {
+        controller.setDarkPaper(AppPreferences.isDarkMode)
     }
 
     suspend fun appendPagesAndNavigate(doc: NotebookDocument, newPages: List<NotebookPage>) {
@@ -261,30 +273,74 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     var showAiMenu by remember { mutableStateOf(false) }
     var showInsertMenu by remember { mutableStateOf(false) }
     var showLiveCastSheet by remember { mutableStateOf(false) }
+    var selectedColorArgb by remember { mutableStateOf(PALETTE[0]) }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(document?.name ?: "") },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        saveDocument()
-                        onBack()
-                    }) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Zurück")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { controller.undo() }, enabled = controller.hasUndo) {
-                        Icon(Icons.Filled.Undo, contentDescription = "Rückgängig")
-                    }
-                    IconButton(onClick = { controller.redo() }, enabled = controller.hasRedo) {
-                        Icon(Icons.Filled.Redo, contentDescription = "Wiederholen")
-                    }
-                    Box {
-                        IconButton(onClick = { showInsertMenu = true }) {
-                            Icon(Icons.Filled.PictureAsPdf, contentDescription = "Einfügen")
+            Column {
+                TopAppBar(
+                    title = { Text(document?.name ?: "") },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            saveDocument()
+                            onBack()
+                        }) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = "Zurück")
                         }
+                    },
+                    actions = {
+                        IconButton(onClick = { controller.undo() }, enabled = controller.hasUndo) {
+                            Icon(Icons.Filled.Undo, contentDescription = "Rückgängig")
+                        }
+                        IconButton(onClick = { controller.redo() }, enabled = controller.hasRedo) {
+                            Icon(Icons.Filled.Redo, contentDescription = "Wiederholen")
+                        }
+                        IconButton(onClick = { AppPreferences.toggleDarkMode(context) }) {
+                            Icon(
+                                if (AppPreferences.isDarkMode) Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                                contentDescription = "Dunkelmodus umschalten"
+                            )
+                        }
+                        IconButton(onClick = { saveDocument() }) {
+                            Icon(Icons.Filled.Save, contentDescription = "Speichern")
+                        }
+                        Box {
+                            IconButton(onClick = { showAiMenu = true }) {
+                                Icon(Icons.Filled.SmartToy, contentDescription = "KI-Assistent")
+                            }
+                            DropdownMenu(expanded = showAiMenu, onDismissRequest = { showAiMenu = false }) {
+                                for (provider in AiProvider.entries) {
+                                    DropdownMenuItem(
+                                        text = { Text(provider.label) },
+                                        onClick = {
+                                            showAiMenu = false
+                                            openAiProvider(context, provider)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                )
+
+                // Row 2: colorful action pills — same pattern as the iPad app's second
+                // toolbar row (Formen/Handschrift/Mathe/…), just with Android's own
+                // feature set (no eraser/pen-type picker here yet, see README).
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box {
+                        ActionPill(
+                            label = "Einfügen",
+                            icon = Icons.Filled.Add,
+                            color = IosColors.Teal,
+                            onClick = { showInsertMenu = true }
+                        )
                         DropdownMenu(expanded = showInsertMenu, onDismissRequest = { showInsertMenu = false }) {
                             DropdownMenuItem(
                                 text = { Text("PDF importieren") },
@@ -313,43 +369,29 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             )
                         }
                     }
-                    IconButton(onClick = {
-                        val name = (document?.name ?: "Notizbuch") + ".pdf"
-                        pdfExportLauncher.launch(name)
-                    }) {
-                        Icon(Icons.Filled.IosShare, contentDescription = "Als PDF exportieren")
-                    }
-                    IconButton(onClick = { startOcr() }) {
-                        Icon(Icons.Filled.TextFields, contentDescription = "Text erkennen (OCR)")
-                    }
-                    IconButton(onClick = { showLiveCastSheet = true }) {
-                        Icon(
-                            Icons.Filled.Wifi,
-                            contentDescription = "Live-Übertragung",
-                            tint = if (LiveCastServer.isStreaming) Color(0xFFE53935) else Color.Unspecified
-                        )
-                    }
-                    IconButton(onClick = { saveDocument() }) {
-                        Icon(Icons.Filled.Save, contentDescription = "Speichern")
-                    }
-                    Box {
-                        IconButton(onClick = { showAiMenu = true }) {
-                            Icon(Icons.Filled.SmartToy, contentDescription = "KI-Assistent")
+                    ActionPill(
+                        label = "Exportieren",
+                        icon = Icons.Filled.IosShare,
+                        color = IosColors.Blue,
+                        onClick = {
+                            val name = (document?.name ?: "Notizbuch") + ".pdf"
+                            pdfExportLauncher.launch(name)
                         }
-                        DropdownMenu(expanded = showAiMenu, onDismissRequest = { showAiMenu = false }) {
-                            for (provider in AiProvider.entries) {
-                                DropdownMenuItem(
-                                    text = { Text(provider.label) },
-                                    onClick = {
-                                        showAiMenu = false
-                                        openAiProvider(context, provider)
-                                    }
-                                )
-                            }
-                        }
-                    }
+                    )
+                    ActionPill(
+                        label = "Text erkennen",
+                        icon = Icons.Filled.TextFields,
+                        color = IosColors.Indigo,
+                        onClick = { startOcr() }
+                    )
+                    ActionPill(
+                        label = if (LiveCastServer.isStreaming) "LIVE" else "Übertragen",
+                        icon = Icons.Filled.Wifi,
+                        color = if (LiveCastServer.isStreaming) IosColors.Red else IosColors.Pink,
+                        onClick = { showLiveCastSheet = true }
+                    )
                 }
-            )
+            }
         },
         bottomBar = {
             val doc = document
@@ -364,13 +406,26 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         for (c in PALETTE) {
                             Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .padding(4.dp)
                                     .size(28.dp)
                                     .clip(CircleShape)
                                     .background(Color(c))
-                                    .clickable { controller.setColor(c) }
-                            )
+                                    .clickable {
+                                        selectedColorArgb = c
+                                        controller.setColor(c)
+                                    }
+                            ) {
+                                if (selectedColorArgb == c) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = if (c == AndroidColor.WHITE) Color.Black else Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {

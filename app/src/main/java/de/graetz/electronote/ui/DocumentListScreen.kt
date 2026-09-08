@@ -11,13 +11,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -47,7 +50,19 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit) {
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("ElectroNote") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("ElectroNote") },
+                actions = {
+                    IconButton(onClick = { AppPreferences.toggleDarkMode(context) }) {
+                        Icon(
+                            if (AppPreferences.isDarkMode) Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                            contentDescription = "Dunkelmodus umschalten"
+                        )
+                    }
+                }
+            )
+        },
         floatingActionButton = {
             FloatingActionButton(onClick = {
                 val count = documents.size + 1
@@ -96,7 +111,11 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit) {
                                 modifier = Modifier
                                     .weight(1f)
                             ) {
-                                Icon(Icons.Filled.Description, contentDescription = null)
+                                Icon(
+                                    Icons.Filled.Description,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
                                 Column(modifier = Modifier.padding(start = 12.dp)) {
                                     Text(doc.name)
                                     Text(

@@ -57,6 +57,10 @@ class InkCanvasController {
         view?.setBackgroundPage(bitmap)
     }
 
+    fun setDarkPaper(dark: Boolean) {
+        view?.setDarkPaper(dark)
+    }
+
     /** Starts (or stops) lasso-selection mode for OCR; see [InkCanvasView.selectionModeActive]. */
     fun startSelection(onMade: (RectF) -> Unit, onCancelled: () -> Unit) {
         val v = view ?: return
