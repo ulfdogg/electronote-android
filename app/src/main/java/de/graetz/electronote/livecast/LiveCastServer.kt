@@ -6,8 +6,10 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import android.view.View
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.lang.ref.WeakReference
