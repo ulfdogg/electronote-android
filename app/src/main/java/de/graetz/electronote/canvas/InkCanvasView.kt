@@ -7,44 +7,51 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import de.graetz.electronote.data.PageBackground
+import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.min
+
+enum class PlacementMode { NONE, TEXT, STICKY }
 
 /**
- * Minimal handwriting canvas: freehand ink strokes from finger or stylus input,
- * with undo/redo and an optional page-background bitmap (e.g. an imported PDF page).
- *
- * This is the Android analogue of PencilKit's PKCanvasView on iOS — there is no
- * built-in equivalent on Android, so stroke capture/rendering is hand-rolled here.
+ * A continuous, tall handwriting canvas — one per notebook, meant to live inside a
+ * vertically scrolling container so it behaves like the iPad app's infinite notebook
+ * rather than a fixed page. This view does not resize itself; when the user writes near
+ * the bottom it asks its caller (via [onWantsMoreHeight]) to grow the Compose-managed
+ * height, then just redraws once relaid-out taller — Android has no PencilKit
+ * equivalent, so stroke capture/rendering is hand-rolled here.
  */
 class InkCanvasView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
 
-    /** Notified whenever the stroke list changes (draw, undo, redo, clear, load). */
     var onStrokesChanged: ((hasUndo: Boolean, hasRedo: Boolean) -> Unit)? = null
-
-    var currentColor: Int = Color.BLACK
-    var currentWidthPx: Float = 6f
-
-    /** If true, only stylus input draws; finger touches are ignored (for palm rejection). */
-    var stylusOnly: Boolean = false
-
-    /**
-     * While true, touches draw a temporary lasso selection (for OCR) instead of ink.
-     * Caller sets this, then reacts to [onSelectionMade] / [onSelectionCancelled].
-     */
-    var selectionModeActive: Boolean = false
-        set(value) {
-            field = value
-            selectionPoints = null
-            invalidate()
-        }
+    var onWantsMoreHeight: ((suggestedHeightPx: Int) -> Unit)? = null
+    var onWidthKnown: ((Int) -> Unit)? = null
     var onSelectionMade: ((RectF) -> Unit)? = null
     var onSelectionCancelled: (() -> Unit)? = null
+    var onTextPlacementRequested: ((Float, Float) -> Unit)? = null
+    var onStickyPlacementRequested: ((Float, Float) -> Unit)? = null
+    var onTextElementTapped: ((TextElement) -> Unit)? = null
+    var onStickyNoteTapped: ((StickyNoteElement) -> Unit)? = null
+
+    var currentTool: DrawTool = DrawTool.PEN
+    var currentColor: Int = Color.BLACK
+    var currentWidthPx: Float = 6f
+    var shapeSnapEnabled: Boolean = false
+    var paperStyle: PaperStyle = PaperStyle.LINED
+        set(value) { field = value; invalidate() }
+    var stylusOnly: Boolean = false
+    var selectionModeActive: Boolean = false
+        set(value) { field = value; selectionPoints = null; invalidate() }
+    var placementMode: PlacementMode = PlacementMode.NONE
 
     private val strokes = mutableListOf<Stroke>()
     private val redoStack = mutableListOf<Stroke>()
@@ -52,13 +59,21 @@ class InkCanvasView @JvmOverloads constructor(
     private var selectionPoints: MutableList<StrokePoint>? = null
     private var activePointerId: Int = -1
 
-    private var backgroundBitmap: Bitmap? = null
+    private val backgroundLayers = mutableListOf<Pair<PageBackground, Bitmap?>>()
+    private val textElements = mutableListOf<TextElement>()
+    private val stickyNotes = mutableListOf<StickyNoteElement>()
 
-    private val backgroundPaint = Paint().apply {
-        isAntiAlias = true
-        isFilterBitmap = true
+    private val backgroundPaint = Paint().apply { isAntiAlias = true; isFilterBitmap = true }
+    private val gridPaint = Paint().apply {
+        isAntiAlias = false
+        color = Color.parseColor("#DADCE0")
+        strokeWidth = 1.5f
     }
-
+    private val dotPaint = Paint().apply {
+        isAntiAlias = true
+        color = Color.parseColor("#C6C9CE")
+        style = Paint.Style.FILL
+    }
     private val selectionStrokePaint = Paint().apply {
         isAntiAlias = true
         style = Paint.Style.STROKE
@@ -71,21 +86,38 @@ class InkCanvasView @JvmOverloads constructor(
         style = Paint.Style.FILL
         color = Color.parseColor("#338E24AA")
     }
+    private val eraserPreviewPaint = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        color = Color.parseColor("#9E9E9E")
+    }
+    private var lastEraserPoint: StrokePoint? = null
+
+    companion object {
+        private const val EXTEND_MARGIN_PX = 320f
+        private const val EXTEND_STEP_PX = 1000
+        private const val ERASER_RADIUS_PX = 26f
+        private const val GRID_STEP_PX = 44f
+        private const val LINE_STEP_PX = 56f
+        private const val DOT_STEP_PX = 44f
+    }
 
     init {
         setBackgroundColor(Color.WHITE)
     }
 
-    // MARK: - Public API
-
-    fun setBackgroundPage(bitmap: Bitmap?) {
-        backgroundBitmap = bitmap
-        invalidate()
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w > 0 && w != oldw) onWidthKnown?.invoke(w)
     }
 
-    /** Dark paper, matching the iPad app's "Dunkles Papier" toggle. */
-    fun setDarkPaper(dark: Boolean) {
-        setBackgroundColor(if (dark) Color.parseColor("#1C1C1E") else Color.WHITE)
+    // MARK: - Content
+
+    fun setBackgroundLayers(layers: List<Pair<PageBackground, Bitmap?>>) {
+        backgroundLayers.clear()
+        backgroundLayers.addAll(layers)
+        invalidate()
     }
 
     fun setStrokes(newStrokes: List<Stroke>) {
@@ -97,7 +129,49 @@ class InkCanvasView @JvmOverloads constructor(
         notifyChanged()
     }
 
+    fun setTextElements(elements: List<TextElement>) {
+        textElements.clear()
+        textElements.addAll(elements)
+        invalidate()
+    }
+
+    fun setStickyNotes(notes: List<StickyNoteElement>) {
+        stickyNotes.clear()
+        stickyNotes.addAll(notes)
+        invalidate()
+    }
+
     fun getStrokes(): List<Stroke> = strokes.toList()
+    fun getTextElements(): List<TextElement> = textElements.toList()
+    fun getStickyNotes(): List<StickyNoteElement> = stickyNotes.toList()
+
+    fun addTextElement(element: TextElement) {
+        textElements.add(element)
+        invalidate()
+    }
+
+    fun updateOrRemoveTextElement(id: String, newText: String?) {
+        if (newText.isNullOrBlank()) {
+            textElements.removeAll { it.id == id }
+        } else {
+            textElements.find { it.id == id }?.text = newText
+        }
+        invalidate()
+    }
+
+    fun addStickyNote(note: StickyNoteElement) {
+        stickyNotes.add(note)
+        invalidate()
+    }
+
+    fun updateOrRemoveStickyNote(id: String, newText: String?, remove: Boolean) {
+        if (remove) {
+            stickyNotes.removeAll { it.id == id }
+        } else if (newText != null) {
+            stickyNotes.find { it.id == id }?.text = newText
+        }
+        invalidate()
+    }
 
     fun undo() {
         if (strokes.isEmpty()) return
@@ -113,37 +187,61 @@ class InkCanvasView @JvmOverloads constructor(
         notifyChanged()
     }
 
-    fun clearAll() {
-        strokes.clear()
-        redoStack.clear()
-        currentPoints = null
-        invalidate()
-        notifyChanged()
-    }
-
     private fun notifyChanged() {
         onStrokesChanged?.invoke(strokes.isNotEmpty(), redoStack.isNotEmpty())
+    }
+
+    /** Dark paper, matching the iPad app's "Dunkles Papier" toggle. */
+    fun setDarkPaper(dark: Boolean) {
+        setBackgroundColor(if (dark) Color.parseColor("#1C1C1E") else Color.WHITE)
+        gridPaint.color = if (dark) Color.parseColor("#3A3A3C") else Color.parseColor("#DADCE0")
+        dotPaint.color = if (dark) Color.parseColor("#48484A") else Color.parseColor("#C6C9CE")
+        invalidate()
     }
 
     // MARK: - Touch handling
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (selectionModeActive) {
-            return handleSelectionTouch(event)
+        if (selectionModeActive) return handleSelectionTouch(event)
+
+        if (placementMode != PlacementMode.NONE) {
+            if (event.actionMasked == MotionEvent.ACTION_UP) {
+                val mode = placementMode
+                placementMode = PlacementMode.NONE
+                when (mode) {
+                    PlacementMode.TEXT -> onTextPlacementRequested?.invoke(event.x, event.y)
+                    PlacementMode.STICKY -> onStickyPlacementRequested?.invoke(event.x, event.y)
+                    PlacementMode.NONE -> {}
+                }
+            }
+            return true
+        }
+
+        if (currentTool == DrawTool.ERASER) {
+            return handleEraserTouch(event)
+        }
+
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            val hitText = textElements.lastOrNull { hitTestText(it, event.x, event.y) }
+            if (hitText != null) {
+                onTextElementTapped?.invoke(hitText)
+                return true
+            }
+            val hitSticky = stickyNotes.lastOrNull { hitTestSticky(it, event.x, event.y) }
+            if (hitSticky != null) {
+                onStickyNoteTapped?.invoke(hitSticky)
+                return true
+            }
         }
 
         val toolType = event.getToolType(event.actionIndex)
-        val isStylus = toolType == MotionEvent.TOOL_TYPE_STYLUS ||
-            toolType == MotionEvent.TOOL_TYPE_ERASER
+        val isStylus = toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER
         if (stylusOnly && !isStylus && event.actionMasked == MotionEvent.ACTION_DOWN) {
             return false
         }
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                // A second finger touching down while writing cancels the current stroke,
-                // so two-finger gestures elsewhere (e.g. scrolling a parent view) don't
-                // leave behind a stray mark.
                 activePointerId = event.getPointerId(0)
                 currentPoints = mutableListOf(pointFrom(event, 0))
                 invalidate()
@@ -162,12 +260,13 @@ class InkCanvasView @JvmOverloads constructor(
                         )
                     )
                 }
-                pts.add(pointFrom(event, idx))
+                val p = pointFrom(event, idx)
+                pts.add(p)
+                maybeExtendCanvas(p.y)
                 invalidate()
                 return true
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                // Extra finger arrived mid-stroke — abort the in-progress stroke.
                 currentPoints = null
                 invalidate()
                 return true
@@ -187,6 +286,84 @@ class InkCanvasView @JvmOverloads constructor(
 
     private fun pointFrom(event: MotionEvent, index: Int): StrokePoint =
         StrokePoint(event.getX(index), event.getY(index), event.getPressure(index))
+
+    private fun maybeExtendCanvas(y: Float) {
+        if (height <= 0) return
+        if (y > height - EXTEND_MARGIN_PX) {
+            onWantsMoreHeight?.invoke(height + EXTEND_STEP_PX)
+        }
+    }
+
+    private fun hitTestText(t: TextElement, x: Float, y: Float): Boolean =
+        x >= t.x - 12 && x <= t.x + 340 && y >= t.y - 12 && y <= t.y + 110
+
+    private fun hitTestSticky(s: StickyNoteElement, x: Float, y: Float): Boolean =
+        x >= s.x && x <= s.x + STICKY_NOTE_SIZE_PX && y >= s.y && y <= s.y + STICKY_NOTE_SIZE_PX
+
+    // MARK: - Eraser
+
+    private fun handleEraserTouch(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                lastEraserPoint = StrokePoint(event.x, event.y)
+                eraseNear(event.x, event.y)
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                lastEraserPoint = null
+                invalidate()
+                return true
+            }
+        }
+        return true
+    }
+
+    private fun eraseNear(x: Float, y: Float) {
+        val before = strokes.size
+        strokes.removeAll { stroke -> stroke.points.any { hypot((it.x - x).toDouble(), (it.y - y).toDouble()) < ERASER_RADIUS_PX } }
+        textElements.removeAll { hitTestText(it, x, y) }
+        stickyNotes.removeAll { hitTestSticky(it, x, y) }
+        if (strokes.size != before) {
+            redoStack.clear()
+            notifyChanged()
+        }
+    }
+
+    // MARK: - Tool-specific ink
+
+    private fun colorForCurrentTool(): Int {
+        val r = Color.red(currentColor)
+        val g = Color.green(currentColor)
+        val b = Color.blue(currentColor)
+        return when (currentTool) {
+            DrawTool.MARKER -> Color.argb(90, r, g, b)
+            DrawTool.PENCIL -> Color.argb(215, r, g, b)
+            else -> currentColor
+        }
+    }
+
+    private fun widthForCurrentTool(): Float = when (currentTool) {
+        DrawTool.PEN -> currentWidthPx
+        DrawTool.MARKER -> max(currentWidthPx * 2.5f, 10f)
+        DrawTool.PENCIL -> max(currentWidthPx * 0.8f, 2f)
+        DrawTool.ERASER -> currentWidthPx
+    }
+
+    private fun finishStroke() {
+        val pts = currentPoints
+        currentPoints = null
+        if (pts != null && pts.size > 1) {
+            var stroke = Stroke(points = pts, colorArgb = colorForCurrentTool(), widthPx = widthForCurrentTool())
+            if (shapeSnapEnabled && (currentTool == DrawTool.PEN || currentTool == DrawTool.PENCIL)) {
+                ShapeSnapper.snap(stroke)?.let { (snapped, _) -> stroke = snapped }
+            }
+            strokes.add(stroke)
+            redoStack.clear()
+            notifyChanged()
+        }
+        invalidate()
+    }
 
     // MARK: - Selection (OCR) touch handling
 
@@ -231,18 +408,15 @@ class InkCanvasView @JvmOverloads constructor(
         var minY = points[0].y
         var maxY = points[0].y
         for (p in points) {
-            minX = minOf(minX, p.x)
-            maxX = maxOf(maxX, p.x)
-            minY = minOf(minY, p.y)
-            maxY = maxOf(maxY, p.y)
+            minX = minOf(minX, p.x); maxX = maxOf(maxX, p.x)
+            minY = minOf(minY, p.y); maxY = maxOf(maxY, p.y)
         }
         return RectF(minX, minY, maxX, maxY)
     }
 
     /**
      * Renders the current background + ink to a bitmap, cropped to [rect] (with a small
-     * padding margin), for feeding into on-device OCR. Coordinates are in the same
-     * view-pixel space as [Stroke] points and the stretched-to-fit background.
+     * padding margin), for feeding into on-device OCR.
      */
     fun captureRegion(rect: RectF, paddingPx: Float = 30f): Bitmap? {
         if (width <= 0 || height <= 0) return null
@@ -250,12 +424,8 @@ class InkCanvasView @JvmOverloads constructor(
         val full = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val fullCanvas = Canvas(full)
         fullCanvas.drawColor(Color.WHITE)
-        backgroundBitmap?.let { bmp ->
-            fullCanvas.drawBitmap(bmp, null, RectF(0f, 0f, width.toFloat(), height.toFloat()), backgroundPaint)
-        }
-        for (stroke in strokes) {
-            fullCanvas.drawStroke(stroke)
-        }
+        drawBackgroundLayers(fullCanvas)
+        for (stroke in strokes) fullCanvas.drawStroke(stroke)
 
         val left = (rect.left - paddingPx).coerceIn(0f, width.toFloat())
         val top = (rect.top - paddingPx).coerceIn(0f, height.toFloat())
@@ -276,31 +446,76 @@ class InkCanvasView @JvmOverloads constructor(
         return cropped
     }
 
-    private fun finishStroke() {
-        val pts = currentPoints
-        currentPoints = null
-        if (pts != null && pts.size > 1) {
-            strokes.add(Stroke(points = pts, colorArgb = currentColor, widthPx = currentWidthPx))
-            redoStack.clear()
-            notifyChanged()
+    // MARK: - Drawing
+
+    private fun drawBackgroundLayers(canvas: Canvas) {
+        for ((bg, bitmap) in backgroundLayers) {
+            bitmap ?: continue
+            val dst = RectF(0f, bg.yOffsetPx.toFloat(), width.toFloat(), (bg.yOffsetPx + bg.heightPx).toFloat())
+            canvas.drawBitmap(bitmap, null, dst, backgroundPaint)
         }
-        invalidate()
     }
 
-    // MARK: - Drawing
+    private fun drawPaperPattern(canvas: Canvas) {
+        if (paperStyle == PaperStyle.BLANK) return
+        val clip = Rect()
+        val hasClip = canvas.getClipBounds(clip)
+        val top = if (hasClip) max(0, clip.top) else 0
+        val bottom = if (hasClip) min(height, clip.bottom) else height
+        val right = width.toFloat()
+
+        when (paperStyle) {
+            PaperStyle.GRID -> {
+                var y = (top / GRID_STEP_PX).toInt() * GRID_STEP_PX
+                while (y < bottom) {
+                    canvas.drawLine(0f, y, right, y, gridPaint)
+                    y += GRID_STEP_PX
+                }
+                var x = 0f
+                while (x < right) {
+                    canvas.drawLine(x, top.toFloat(), x, bottom.toFloat(), gridPaint)
+                    x += GRID_STEP_PX
+                }
+            }
+            PaperStyle.LINED -> {
+                var y = (top / LINE_STEP_PX).toInt() * LINE_STEP_PX
+                while (y < bottom) {
+                    canvas.drawLine(0f, y, right, y, gridPaint)
+                    y += LINE_STEP_PX
+                }
+            }
+            PaperStyle.DOTTED -> {
+                var y = (top / DOT_STEP_PX).toInt() * DOT_STEP_PX
+                while (y < bottom) {
+                    var x = DOT_STEP_PX
+                    while (x < right) {
+                        canvas.drawCircle(x, y, 2.2f, dotPaint)
+                        x += DOT_STEP_PX
+                    }
+                    y += DOT_STEP_PX
+                }
+            }
+            PaperStyle.BLANK -> {}
+        }
+    }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        backgroundBitmap?.let { bmp ->
-            val dst = RectF(0f, 0f, width.toFloat(), height.toFloat())
-            canvas.drawBitmap(bmp, null, dst, backgroundPaint)
+        drawPaperPattern(canvas)
+        drawBackgroundLayers(canvas)
+
+        for (stroke in strokes) canvas.drawStroke(stroke)
+        currentPoints?.let {
+            canvas.drawStroke(Stroke(it, colorForCurrentTool(), widthForCurrentTool()))
         }
 
-        for (stroke in strokes) {
-            canvas.drawStroke(stroke)
+        for (text in textElements) canvas.drawTextElement(text)
+        for (sticky in stickyNotes) canvas.drawStickyNote(sticky)
+
+        lastEraserPoint?.let { p ->
+            canvas.drawCircle(p.x, p.y, ERASER_RADIUS_PX, eraserPreviewPaint)
         }
-        currentPoints?.let { canvas.drawStroke(Stroke(it, currentColor, currentWidthPx)) }
 
         selectionPoints?.let { pts ->
             if (pts.size > 1) {

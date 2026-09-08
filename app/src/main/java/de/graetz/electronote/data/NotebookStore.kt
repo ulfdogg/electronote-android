@@ -58,9 +58,9 @@ object NotebookStore {
         documentDir(context, id).deleteRecursively()
     }
 
-    /** Saves a page-background bitmap (e.g. a rendered PDF page) and returns its filename. */
-    fun savePageBackground(context: Context, documentId: String, page: NotebookPage, bitmap: Bitmap): String {
-        val filename = "${page.id}_bg.png"
+    /** Saves a background layer bitmap (e.g. a rendered PDF page) and returns its filename. */
+    fun saveBackgroundImage(context: Context, documentId: String, backgroundId: String, bitmap: Bitmap): String {
+        val filename = "${backgroundId}_bg.png"
         val file = File(documentDir(context, documentId), filename)
         FileOutputStream(file).use { out ->
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
@@ -68,7 +68,7 @@ object NotebookStore {
         return filename
     }
 
-    fun loadPageBackground(context: Context, documentId: String, filename: String): Bitmap? {
+    fun loadBackgroundImage(context: Context, documentId: String, filename: String): Bitmap? {
         val file = File(documentDir(context, documentId), filename)
         if (!file.exists()) return null
         return BitmapFactory.decodeFile(file.absolutePath)

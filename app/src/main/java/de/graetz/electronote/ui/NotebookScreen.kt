@@ -20,19 +20,26 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.ModeEditOutline
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Title
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
@@ -41,6 +48,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -66,13 +75,16 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import de.graetz.electronote.ai.AiProvider
 import de.graetz.electronote.ai.openAiProvider
+import de.graetz.electronote.canvas.DrawTool
 import de.graetz.electronote.canvas.InkCanvas
 import de.graetz.electronote.canvas.InkCanvasController
+import de.graetz.electronote.canvas.PaperStyle
+import de.graetz.electronote.canvas.StickyNoteElement
+import de.graetz.electronote.canvas.TextElement
 import de.graetz.electronote.data.NotebookDocument
-import de.graetz.electronote.data.NotebookPage
 import de.graetz.electronote.data.NotebookStore
-import de.graetz.electronote.livecast.LiveCastSheet
 import de.graetz.electronote.livecast.LiveCastServer
+import de.graetz.electronote.livecast.LiveCastSheet
 import de.graetz.electronote.media.DocumentScanImporter
 import de.graetz.electronote.media.PhotoImporter
 import de.graetz.electronote.ocr.HandwritingRecognizer
@@ -92,44 +104,38 @@ private val PALETTE = listOf(
     AndroidColor.parseColor("#F57C00"),
 )
 
+private val STROKE_WIDTHS = listOf(2.5f, 4.5f, 7f, 11f)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val controller = remember { InkCanvasController() }
+    val scrollState = rememberScrollState()
 
     var document by remember { mutableStateOf<NotebookDocument?>(null) }
-    var currentPageIndex by remember { mutableStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
 
-    fun syncCurrentPage() {
-        val doc = document ?: return
-        if (currentPageIndex in doc.pages.indices) {
-            val page = doc.pages[currentPageIndex]
-            page.strokes = controller.getStrokes()
-            controller.canvasSize()?.let { (w, h) ->
-                page.canvasWidthPx = w
-                page.canvasHeightPx = h
-            }
+    suspend fun reloadBackgroundLayers(doc: NotebookDocument) {
+        val layers = withContext(Dispatchers.IO) {
+            doc.backgrounds.map { bg -> bg to NotebookStore.loadBackgroundImage(context, doc.id, bg.imageFile) }
         }
+        controller.setBackgroundLayers(layers)
     }
 
-    suspend fun loadPageIntoCanvas(doc: NotebookDocument, index: Int) {
-        val page = doc.pages.getOrNull(index) ?: return
-        controller.setStrokes(page.strokes)
-        val bgFile = page.backgroundImageFile
-        val bitmap = if (bgFile != null) {
-            withContext(Dispatchers.IO) { NotebookStore.loadPageBackground(context, doc.id, bgFile) }
-        } else {
-            null
-        }
-        controller.setBackgroundPage(bitmap)
+    fun syncDocumentFromCanvas() {
+        val doc = document ?: return
+        doc.strokes = controller.getStrokes().toMutableList()
+        doc.textElements = controller.getTextElements().toMutableList()
+        doc.stickyNotes = controller.getStickyNotes().toMutableList()
+        doc.canvasHeightPx = controller.canvasHeightPx
+        if (controller.canvasWidthPx > 0) doc.canvasWidthPx = controller.canvasWidthPx
     }
 
     fun saveDocument() {
         val doc = document ?: return
-        syncCurrentPage()
+        syncDocumentFromCanvas()
         scope.launch(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
     }
 
@@ -137,46 +143,54 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         val loaded = withContext(Dispatchers.IO) { NotebookStore.loadDocument(context, documentId) }
         document = loaded
         if (loaded != null) {
-            loadPageIntoCanvas(loaded, 0)
+            controller.canvasHeightPx = loaded.canvasHeightPx
+            controller.setStrokes(loaded.strokes)
+            controller.setTextElements(loaded.textElements)
+            controller.setStickyNotes(loaded.stickyNotes)
+            reloadBackgroundLayers(loaded)
         }
         isLoading = false
     }
 
+    // The canvas grows itself as the user writes near the bottom; keep the document's
+    // own height field in sync so saves/exports use the current, grown size.
+    LaunchedEffect(controller.canvasHeightPx) {
+        document?.canvasHeightPx = controller.canvasHeightPx
+    }
+    LaunchedEffect(controller.canvasWidthPx) {
+        if (controller.canvasWidthPx > 0) document?.canvasWidthPx = controller.canvasWidthPx
+    }
     LaunchedEffect(AppPreferences.isDarkMode) {
         controller.setDarkPaper(AppPreferences.isDarkMode)
     }
 
-    suspend fun appendPagesAndNavigate(doc: NotebookDocument, newPages: List<NotebookPage>) {
-        if (newPages.isEmpty()) return
-        doc.pages.addAll(newPages)
-        withContext(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
-        currentPageIndex = doc.pages.size - newPages.size
-        loadPageIntoCanvas(doc, currentPageIndex)
-    }
-
     // PDF import: Android's document picker (Storage Access Framework) surfaces Google
-    // Drive, Nextcloud etc. as sources automatically if those apps are installed — no
-    // separate cloud API integration needed to "import from the cloud".
+    // Drive, Nextcloud etc. as sources automatically if those apps are installed.
     val pdfPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         val doc = document ?: return@rememberLauncherForActivityResult
         scope.launch {
-            syncCurrentPage()
-            val newPages = withContext(Dispatchers.IO) { PdfImporter.importPdf(context, uri, doc.id) }
-            appendPagesAndNavigate(doc, newPages)
+            syncDocumentFromCanvas()
+            val newBackgrounds = withContext(Dispatchers.IO) { PdfImporter.importPdf(context, uri, doc) }
+            if (newBackgrounds.isNotEmpty()) {
+                doc.backgrounds.addAll(newBackgrounds)
+                val bottom = newBackgrounds.maxOf { it.yOffsetPx + it.heightPx } + 200
+                doc.canvasHeightPx = maxOf(doc.canvasHeightPx, bottom)
+                controller.canvasHeightPx = doc.canvasHeightPx
+                withContext(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
+                reloadBackgroundLayers(doc)
+            }
         }
     }
 
-    // PDF export: same idea in reverse — ACTION_CREATE_DOCUMENT lets the user save
-    // straight into Drive/Nextcloud/local storage, whatever they pick.
     val pdfExportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/pdf")
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         val doc = document ?: return@rememberLauncherForActivityResult
-        syncCurrentPage()
+        syncDocumentFromCanvas()
         scope.launch(Dispatchers.IO) {
             context.contentResolver.openOutputStream(uri)?.use { out ->
                 PdfExporter.export(context, doc, out)
@@ -184,21 +198,24 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         }
     }
 
-    // Photo import (gallery) — becomes a new page background, same as PDF pages.
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         val doc = document ?: return@rememberLauncherForActivityResult
         scope.launch {
-            syncCurrentPage()
-            val page = withContext(Dispatchers.IO) { PhotoImporter.importPhoto(context, uri, doc.id) }
-            appendPagesAndNavigate(doc, listOfNotNull(page))
+            syncDocumentFromCanvas()
+            val bg = withContext(Dispatchers.IO) { PhotoImporter.importPhoto(context, uri, doc) }
+            if (bg != null) {
+                doc.backgrounds.add(bg)
+                doc.canvasHeightPx = maxOf(doc.canvasHeightPx, bg.yOffsetPx + bg.heightPx + 200)
+                controller.canvasHeightPx = doc.canvasHeightPx
+                withContext(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
+                reloadBackgroundLayers(doc)
+            }
         }
     }
 
-    // Document scanner (ML Kit / Google Play Services): camera-based multi-page scan
-    // with automatic edge detection, each page becomes a notebook page background.
     val docScannerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
@@ -207,11 +224,18 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
             if (scanResult != null) {
                 scope.launch {
-                    syncCurrentPage()
-                    val newPages = withContext(Dispatchers.IO) {
-                        DocumentScanImporter.importResult(context, scanResult, doc.id)
+                    syncDocumentFromCanvas()
+                    val newBackgrounds = withContext(Dispatchers.IO) {
+                        DocumentScanImporter.importResult(context, scanResult, doc)
                     }
-                    appendPagesAndNavigate(doc, newPages)
+                    if (newBackgrounds.isNotEmpty()) {
+                        doc.backgrounds.addAll(newBackgrounds)
+                        val bottom = newBackgrounds.maxOf { it.yOffsetPx + it.heightPx } + 200
+                        doc.canvasHeightPx = maxOf(doc.canvasHeightPx, bottom)
+                        controller.canvasHeightPx = doc.canvasHeightPx
+                        withContext(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
+                        reloadBackgroundLayers(doc)
+                    }
                 }
             }
         }
@@ -235,7 +259,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             }
     }
 
-    // OCR: circle a region of the page, run on-device ML Kit text recognition on it.
+    // OCR
     var ocrResultText by remember { mutableStateOf<String?>(null) }
     val clipboardManager = LocalClipboardManager.current
 
@@ -270,10 +294,33 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         Toast.makeText(context, "Bereich mit Finger/Stift umkreisen", Toast.LENGTH_SHORT).show()
     }
 
+    // Text / sticky-note placement + editing
+    var textPlacementPos by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    var stickyPlacementPos by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    var editingTextElement by remember { mutableStateOf<TextElement?>(null) }
+    var editingStickyNote by remember { mutableStateOf<StickyNoteElement?>(null) }
+    var selectedColorArgb by remember { mutableStateOf(PALETTE[0]) }
+
+    controller.onWantsTextPlacement = { x, y -> textPlacementPos = x to y }
+    controller.onWantsStickyPlacement = { x, y -> stickyPlacementPos = x to y }
+    controller.onTextTapped = { t -> editingTextElement = t }
+    controller.onStickyTapped = { s -> editingStickyNote = s }
+
+    var currentTool by remember { mutableStateOf(DrawTool.PEN) }
+    var shapeSnapEnabled by remember { mutableStateOf(false) }
+    var selectedWidthPx by remember { mutableStateOf(STROKE_WIDTHS[1]) }
+    var paperStyle by remember { mutableStateOf(PaperStyle.LINED) }
     var showAiMenu by remember { mutableStateOf(false) }
     var showInsertMenu by remember { mutableStateOf(false) }
+    var showPaperMenu by remember { mutableStateOf(false) }
     var showLiveCastSheet by remember { mutableStateOf(false) }
-    var selectedColorArgb by remember { mutableStateOf(PALETTE[0]) }
+
+    LaunchedEffect(document?.id) {
+        document?.let {
+            paperStyle = it.paperStyle
+            controller.setPaperStyle(it.paperStyle)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -323,9 +370,83 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     }
                 )
 
-                // Row 2: colorful action pills — same pattern as the iPad app's second
-                // toolbar row (Formen/Handschrift/Mathe/…), just with Android's own
-                // feature set (no eraser/pen-type picker here yet, see README).
+                // Row 2: Werkzeug (Stift/Marker/Bleistift/Radierer), Strichstärke,
+                // Formen-Korrektur, Papiervorlage — everything about *how* you're drawing.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ToolToggle(Icons.Filled.Edit, "Stift", currentTool == DrawTool.PEN) {
+                        currentTool = DrawTool.PEN; controller.setTool(DrawTool.PEN)
+                    }
+                    ToolToggle(Icons.Filled.Brush, "Marker", currentTool == DrawTool.MARKER) {
+                        currentTool = DrawTool.MARKER; controller.setTool(DrawTool.MARKER)
+                    }
+                    ToolToggle(Icons.Filled.ModeEditOutline, "Bleistift", currentTool == DrawTool.PENCIL) {
+                        currentTool = DrawTool.PENCIL; controller.setTool(DrawTool.PENCIL)
+                    }
+                    ToolToggle(Icons.Filled.Backspace, "Radierer", currentTool == DrawTool.ERASER) {
+                        currentTool = DrawTool.ERASER; controller.setTool(DrawTool.ERASER)
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
+                        for (w in STROKE_WIDTHS) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .padding(3.dp)
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (selectedWidthPx == w) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                        else Color.Transparent
+                                    )
+                                    .clickable {
+                                        selectedWidthPx = w
+                                        controller.setWidthPx(w)
+                                    }
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size((w / 1.2f).dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.onSurface)
+                                )
+                            }
+                        }
+                    }
+
+                    ToolToggle(Icons.Filled.AutoFixHigh, "Formen", shapeSnapEnabled) {
+                        shapeSnapEnabled = !shapeSnapEnabled
+                        controller.setShapeSnapEnabled(shapeSnapEnabled)
+                    }
+
+                    Box {
+                        IconButton(onClick = { showPaperMenu = true }) {
+                            Icon(Icons.Filled.GridOn, contentDescription = "Papiervorlage")
+                        }
+                        DropdownMenu(expanded = showPaperMenu, onDismissRequest = { showPaperMenu = false }) {
+                            for (style in PaperStyle.entries) {
+                                DropdownMenuItem(
+                                    text = { Text(style.label()) },
+                                    onClick = {
+                                        showPaperMenu = false
+                                        paperStyle = style
+                                        controller.setPaperStyle(style)
+                                        document?.paperStyle = style
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Row 3: colorful action pills — Einfügen/Exportieren/Text/Haftzettel/
+                // Text erkennen/Live-Übertragung.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -370,6 +491,24 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         }
                     }
                     ActionPill(
+                        label = "Text",
+                        icon = Icons.Filled.Title,
+                        color = IosColors.Orange,
+                        onClick = {
+                            controller.startTextPlacement()
+                            Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                    ActionPill(
+                        label = "Haftzettel",
+                        icon = Icons.Filled.StickyNote2,
+                        color = IosColors.Yellow,
+                        onClick = {
+                            controller.startStickyPlacement()
+                            Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                    ActionPill(
                         label = "Exportieren",
                         icon = Icons.Filled.IosShare,
                         color = IosColors.Blue,
@@ -394,65 +533,34 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             }
         },
         bottomBar = {
-            val doc = document
-            if (doc != null) {
+            if (document != null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        for (c in PALETTE) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .padding(4.dp)
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(c))
-                                    .clickable {
-                                        selectedColorArgb = c
-                                        controller.setColor(c)
-                                    }
-                            ) {
-                                if (selectedColorArgb == c) {
-                                    Icon(
-                                        Icons.Filled.Check,
-                                        contentDescription = null,
-                                        tint = if (c == AndroidColor.WHITE) Color.Black else Color.White,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                    for (c in PALETTE) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color(c))
+                                .clickable {
+                                    selectedColorArgb = c
+                                    controller.setColor(c)
                                 }
-                            }
-                        }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = {
-                                if (currentPageIndex > 0) {
-                                    syncCurrentPage()
-                                    currentPageIndex--
-                                    scope.launch { loadPageIntoCanvas(doc, currentPageIndex) }
-                                }
-                            },
-                            enabled = currentPageIndex > 0
                         ) {
-                            Icon(Icons.Filled.ChevronLeft, contentDescription = "Vorherige Seite")
-                        }
-                        Text("${currentPageIndex + 1} / ${doc.pages.size}")
-                        IconButton(onClick = {
-                            syncCurrentPage()
-                            if (currentPageIndex < doc.pages.size - 1) {
-                                currentPageIndex++
-                            } else {
-                                doc.pages.add(NotebookPage())
-                                currentPageIndex = doc.pages.size - 1
+                            if (selectedColorArgb == c) {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
-                            scope.launch { loadPageIntoCanvas(doc, currentPageIndex) }
-                        }) {
-                            Icon(Icons.Filled.ChevronRight, contentDescription = "Nächste Seite / Neue Seite")
                         }
                     }
                 }
@@ -463,9 +571,10 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(scrollState)
         ) {
             if (!isLoading && document != null) {
-                InkCanvas(controller = controller, modifier = Modifier.fillMaxSize())
+                InkCanvas(controller = controller, modifier = Modifier.fillMaxWidth())
             }
         }
     }
@@ -483,15 +592,129 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                 TextButton(onClick = {
                     clipboardManager.setText(AnnotatedString(text))
                     ocrResultText = null
-                }) {
-                    Text("Kopieren")
-                }
+                }) { Text("Kopieren") }
             },
             dismissButton = {
-                TextButton(onClick = { ocrResultText = null }) {
-                    Text("Schließen")
+                TextButton(onClick = { ocrResultText = null }) { Text("Schließen") }
+            }
+        )
+    }
+
+    textPlacementPos?.let { (x, y) ->
+        var input by remember(x, y) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { textPlacementPos = null },
+            title = { Text("Text einfügen") },
+            text = {
+                OutlinedTextField(value = input, onValueChange = { input = it }, placeholder = { Text("Text…") })
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (input.isNotBlank()) {
+                        controller.addTextElement(TextElement(x = x, y = y, text = input, colorArgb = selectedColorArgb))
+                    }
+                    textPlacementPos = null
+                }) { Text("Einfügen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { textPlacementPos = null }) { Text("Abbrechen") }
+            }
+        )
+    }
+
+    stickyPlacementPos?.let { (x, y) ->
+        var input by remember(x, y) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { stickyPlacementPos = null },
+            title = { Text("Haftzettel einfügen") },
+            text = {
+                OutlinedTextField(value = input, onValueChange = { input = it }, placeholder = { Text("Notiz…") })
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    controller.addStickyNote(
+                        StickyNoteElement(x = x, y = y, text = input, colorIndex = controller.getStickyNotes().size)
+                    )
+                    stickyPlacementPos = null
+                }) { Text("Einfügen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { stickyPlacementPos = null }) { Text("Abbrechen") }
+            }
+        )
+    }
+
+    editingTextElement?.let { element ->
+        var input by remember(element.id) { mutableStateOf(element.text) }
+        AlertDialog(
+            onDismissRequest = { editingTextElement = null },
+            title = { Text("Text bearbeiten") },
+            text = { OutlinedTextField(value = input, onValueChange = { input = it }) },
+            confirmButton = {
+                TextButton(onClick = {
+                    controller.updateOrRemoveTextElement(element.id, input)
+                    editingTextElement = null
+                }) { Text("Speichern") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        controller.updateOrRemoveTextElement(element.id, null)
+                        editingTextElement = null
+                    }) { Text("Löschen") }
+                    TextButton(onClick = { editingTextElement = null }) { Text("Abbrechen") }
                 }
             }
         )
     }
+
+    editingStickyNote?.let { note ->
+        var input by remember(note.id) { mutableStateOf(note.text) }
+        AlertDialog(
+            onDismissRequest = { editingStickyNote = null },
+            title = { Text("Haftzettel bearbeiten") },
+            text = { OutlinedTextField(value = input, onValueChange = { input = it }) },
+            confirmButton = {
+                TextButton(onClick = {
+                    controller.updateOrRemoveStickyNote(note.id, input, remove = false)
+                    editingStickyNote = null
+                }) { Text("Speichern") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        controller.updateOrRemoveStickyNote(note.id, null, remove = true)
+                        editingStickyNote = null
+                    }) { Text("Löschen") }
+                    TextButton(onClick = { editingStickyNote = null }) { Text("Abbrechen") }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ToolToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .padding(2.dp)
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent)
+            .clickable(onClick = onClick)
+    ) {
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = if (active) Color.White else MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+private fun PaperStyle.label(): String = when (this) {
+    PaperStyle.BLANK -> "Blanko"
+    PaperStyle.GRID -> "Kariert"
+    PaperStyle.LINED -> "Liniert"
+    PaperStyle.DOTTED -> "Punktraster"
 }
