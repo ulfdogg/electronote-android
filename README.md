@@ -18,12 +18,23 @@ Apples PencilKit/Vision-Frameworks auf Android keine Entsprechung haben.
   eingebetteten WebView) — Google blockiert sonst "Mit Google anmelden", genau wie bei
   WKWebView auf iOS. Custom Tabs nutzt die echte, installierte Chrome-Sitzung.
 
+- Live-Übertragung (LiveCast): selbstgebauter HTTP/WebSocket-Server, überträgt den
+  aktuellen Bildschirminhalt live an jeden Browser im selben WLAN, mit QR-Code zum
+  schnellen Verbinden. Android-Analogon zum iOS-LiveCast (dort NWListener, hier
+  java.net.ServerSocket). Bildschirm bleibt während der Übertragung wach.
+- OCR: Bereich mit Finger/Stift umkreisen → On-Device-Texterkennung (ML Kit), Ergebnis
+  in die Zwischenablage kopierbar.
+- Foto-Import: Bild aus der Galerie als neue Seite mit Hintergrundbild einfügen.
+- Dokumentenscanner: Kamera-basiertes Scannen mit automatischer Kantenerkennung
+  (ML Kit Document Scanner von Google), jede gescannte Seite wird als Notizbuchseite
+  eingefügt.
+
 ## Bewusst noch nicht enthalten
 
 Direkte Cloud-Konten-Anbindung (WebDAV/Drive-API mit eigenem Login statt über die
-Speicherort-Auswahl), Live-Cast, OCR/Handschrift- & Mathe-Erkennung, Formen-Korrektur,
-Diagramm-Editoren, ClipArt, Web-Clipper, automatische Seitenübergabe an die KI (setzt OCR
-voraus) — folgt schrittweise.
+Speicherort-Auswahl), Mathe-Erkennung, Formen-Korrektur, Diagramm-Editoren, ClipArt,
+Web-Clipper, automatische Seitenübergabe an die KI, Video-Import, YouTube-Einbettung —
+folgt schrittweise.
 
 ## Build
 

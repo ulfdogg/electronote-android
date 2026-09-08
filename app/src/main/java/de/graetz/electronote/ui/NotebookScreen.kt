@@ -1,8 +1,11 @@
 package de.graetz.electronote.ui
 
+import android.app.Activity
 import android.graphics.Color as AndroidColor
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,7 +26,10 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,8 +50,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanner
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import de.graetz.electronote.ai.AiProvider
 import de.graetz.electronote.ai.openAiProvider
 import de.graetz.electronote.canvas.InkCanvas
@@ -52,6 +65,11 @@ import de.graetz.electronote.canvas.InkCanvasController
 import de.graetz.electronote.data.NotebookDocument
 import de.graetz.electronote.data.NotebookPage
 import de.graetz.electronote.data.NotebookStore
+import de.graetz.electronote.livecast.LiveCastSheet
+import de.graetz.electronote.livecast.LiveCastServer
+import de.graetz.electronote.media.DocumentScanImporter
+import de.graetz.electronote.media.PhotoImporter
+import de.graetz.electronote.ocr.HandwritingRecognizer
 import de.graetz.electronote.pdf.PdfExporter
 import de.graetz.electronote.pdf.PdfImporter
 import kotlinx.coroutines.Dispatchers
@@ -116,6 +134,14 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         isLoading = false
     }
 
+    suspend fun appendPagesAndNavigate(doc: NotebookDocument, newPages: List<NotebookPage>) {
+        if (newPages.isEmpty()) return
+        doc.pages.addAll(newPages)
+        withContext(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
+        currentPageIndex = doc.pages.size - newPages.size
+        loadPageIntoCanvas(doc, currentPageIndex)
+    }
+
     // PDF import: Android's document picker (Storage Access Framework) surfaces Google
     // Drive, Nextcloud etc. as sources automatically if those apps are installed — no
     // separate cloud API integration needed to "import from the cloud".
@@ -126,15 +152,8 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         val doc = document ?: return@rememberLauncherForActivityResult
         scope.launch {
             syncCurrentPage()
-            val newPages = withContext(Dispatchers.IO) {
-                PdfImporter.importPdf(context, uri, doc.id)
-            }
-            if (newPages.isNotEmpty()) {
-                doc.pages.addAll(newPages)
-                withContext(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
-                currentPageIndex = doc.pages.size - newPages.size
-                loadPageIntoCanvas(doc, currentPageIndex)
-            }
+            val newPages = withContext(Dispatchers.IO) { PdfImporter.importPdf(context, uri, doc.id) }
+            appendPagesAndNavigate(doc, newPages)
         }
     }
 
@@ -153,7 +172,95 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         }
     }
 
+    // Photo import (gallery) — becomes a new page background, same as PDF pages.
+    val photoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val doc = document ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            syncCurrentPage()
+            val page = withContext(Dispatchers.IO) { PhotoImporter.importPhoto(context, uri, doc.id) }
+            appendPagesAndNavigate(doc, listOfNotNull(page))
+        }
+    }
+
+    // Document scanner (ML Kit / Google Play Services): camera-based multi-page scan
+    // with automatic edge detection, each page becomes a notebook page background.
+    val docScannerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val doc = document ?: return@rememberLauncherForActivityResult
+        if (result.resultCode == Activity.RESULT_OK) {
+            val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
+            if (scanResult != null) {
+                scope.launch {
+                    syncCurrentPage()
+                    val newPages = withContext(Dispatchers.IO) {
+                        DocumentScanImporter.importResult(context, scanResult, doc.id)
+                    }
+                    appendPagesAndNavigate(doc, newPages)
+                }
+            }
+        }
+    }
+
+    fun startDocumentScan() {
+        val activity = context as? Activity ?: return
+        val options = GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(false)
+            .setPageLimit(20)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .build()
+        val scanner: GmsDocumentScanner = GmsDocumentScanning.getClient(options)
+        scanner.getStartScanIntent(activity)
+            .addOnSuccessListener { intentSender ->
+                docScannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(context, "Scanner konnte nicht gestartet werden: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+    }
+
+    // OCR: circle a region of the page, run on-device ML Kit text recognition on it.
+    var ocrResultText by remember { mutableStateOf<String?>(null) }
+    val clipboardManager = LocalClipboardManager.current
+
+    fun startOcr() {
+        controller.startSelection(
+            onMade = { rect ->
+                val bitmap = controller.captureRegion(rect)
+                controller.stopSelection()
+                if (bitmap == null) {
+                    Toast.makeText(context, "Konnte Bereich nicht erfassen", Toast.LENGTH_SHORT).show()
+                } else {
+                    scope.launch {
+                        val text = try {
+                            withContext(Dispatchers.Default) { HandwritingRecognizer.recognize(bitmap) }
+                        } catch (e: Exception) {
+                            ""
+                        } finally {
+                            bitmap.recycle()
+                        }
+                        if (text.isBlank()) {
+                            Toast.makeText(context, "Nichts erkannt", Toast.LENGTH_SHORT).show()
+                        } else {
+                            ocrResultText = text
+                        }
+                    }
+                }
+            },
+            onCancelled = {
+                Toast.makeText(context, "Auswahl zu klein — bitte großzügiger umkreisen", Toast.LENGTH_SHORT).show()
+            }
+        )
+        Toast.makeText(context, "Bereich mit Finger/Stift umkreisen", Toast.LENGTH_SHORT).show()
+    }
+
     var showAiMenu by remember { mutableStateOf(false) }
+    var showInsertMenu by remember { mutableStateOf(false) }
+    var showLiveCastSheet by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -174,14 +281,53 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     IconButton(onClick = { controller.redo() }, enabled = controller.hasRedo) {
                         Icon(Icons.Filled.Redo, contentDescription = "Wiederholen")
                     }
-                    IconButton(onClick = { pdfPicker.launch(arrayOf("application/pdf")) }) {
-                        Icon(Icons.Filled.PictureAsPdf, contentDescription = "PDF importieren")
+                    Box {
+                        IconButton(onClick = { showInsertMenu = true }) {
+                            Icon(Icons.Filled.PictureAsPdf, contentDescription = "Einfügen")
+                        }
+                        DropdownMenu(expanded = showInsertMenu, onDismissRequest = { showInsertMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("PDF importieren") },
+                                onClick = {
+                                    showInsertMenu = false
+                                    pdfPicker.launch(arrayOf("application/pdf"))
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Foto importieren") },
+                                onClick = {
+                                    showInsertMenu = false
+                                    photoPicker.launch(
+                                        androidx.activity.result.PickVisualMediaRequest(
+                                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                                        )
+                                    )
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Dokument scannen") },
+                                onClick = {
+                                    showInsertMenu = false
+                                    startDocumentScan()
+                                }
+                            )
+                        }
                     }
                     IconButton(onClick = {
                         val name = (document?.name ?: "Notizbuch") + ".pdf"
                         pdfExportLauncher.launch(name)
                     }) {
                         Icon(Icons.Filled.IosShare, contentDescription = "Als PDF exportieren")
+                    }
+                    IconButton(onClick = { startOcr() }) {
+                        Icon(Icons.Filled.TextFields, contentDescription = "Text erkennen (OCR)")
+                    }
+                    IconButton(onClick = { showLiveCastSheet = true }) {
+                        Icon(
+                            Icons.Filled.Wifi,
+                            contentDescription = "Live-Übertragung",
+                            tint = if (LiveCastServer.isStreaming) Color(0xFFE53935) else Color.Unspecified
+                        )
                     }
                     IconButton(onClick = { saveDocument() }) {
                         Icon(Icons.Filled.Save, contentDescription = "Speichern")
@@ -267,5 +413,30 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                 InkCanvas(controller = controller, modifier = Modifier.fillMaxSize())
             }
         }
+    }
+
+    if (showLiveCastSheet) {
+        LiveCastSheet(onDismiss = { showLiveCastSheet = false })
+    }
+
+    ocrResultText?.let { text ->
+        AlertDialog(
+            onDismissRequest = { ocrResultText = null },
+            title = { Text("Erkannter Text") },
+            text = { Text(text) },
+            confirmButton = {
+                TextButton(onClick = {
+                    clipboardManager.setText(AnnotatedString(text))
+                    ocrResultText = null
+                }) {
+                    Text("Kopieren")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { ocrResultText = null }) {
+                    Text("Schließen")
+                }
+            }
+        )
     }
 }

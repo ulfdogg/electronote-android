@@ -1,6 +1,7 @@
 package de.graetz.electronote.canvas
 
 import android.graphics.Bitmap
+import android.graphics.RectF
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -55,6 +56,24 @@ class InkCanvasController {
     fun setBackgroundPage(bitmap: Bitmap?) {
         view?.setBackgroundPage(bitmap)
     }
+
+    /** Starts (or stops) lasso-selection mode for OCR; see [InkCanvasView.selectionModeActive]. */
+    fun startSelection(onMade: (RectF) -> Unit, onCancelled: () -> Unit) {
+        val v = view ?: return
+        v.onSelectionMade = { rect ->
+            onMade(rect)
+        }
+        v.onSelectionCancelled = onCancelled
+        v.selectionModeActive = true
+    }
+
+    fun stopSelection() {
+        view?.selectionModeActive = false
+    }
+
+    fun isSelectionActive(): Boolean = view?.selectionModeActive ?: false
+
+    fun captureRegion(rect: RectF): Bitmap? = view?.captureRegion(rect)
 }
 
 @Composable

@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- LiveCast: local HTTP/WebSocket server so a browser on the same Wi-Fi can view
+         the notebook live. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Needed since Android 11 (API 30) so Chrome Custom Tabs can find an installed
          browser to open the AI providers in (see de.graetz.electronote.ai.AiProvider). -->
     <queries>
