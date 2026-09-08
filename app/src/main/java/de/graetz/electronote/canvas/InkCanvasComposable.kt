@@ -34,6 +34,12 @@ class InkCanvasController {
     fun clearAll() = view?.clearAll()
     fun getStrokes(): List<Stroke> = view?.getStrokes() ?: emptyList()
 
+    /** Current on-screen pixel size of the canvas, or null before it's been laid out. */
+    fun canvasSize(): Pair<Int, Int>? {
+        val v = view ?: return null
+        return if (v.width > 0 && v.height > 0) v.width to v.height else null
+    }
+
     fun setStrokes(strokes: List<Stroke>) {
         view?.setStrokes(strokes)
     }

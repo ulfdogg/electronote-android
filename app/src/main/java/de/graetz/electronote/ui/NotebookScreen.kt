@@ -18,10 +18,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,11 +45,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import de.graetz.electronote.ai.AiProvider
+import de.graetz.electronote.ai.openAiProvider
 import de.graetz.electronote.canvas.InkCanvas
 import de.graetz.electronote.canvas.InkCanvasController
 import de.graetz.electronote.data.NotebookDocument
 import de.graetz.electronote.data.NotebookPage
 import de.graetz.electronote.data.NotebookStore
+import de.graetz.electronote.pdf.PdfExporter
 import de.graetz.electronote.pdf.PdfImporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -73,7 +80,12 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     fun syncCurrentPage() {
         val doc = document ?: return
         if (currentPageIndex in doc.pages.indices) {
-            doc.pages[currentPageIndex].strokes = controller.getStrokes()
+            val page = doc.pages[currentPageIndex]
+            page.strokes = controller.getStrokes()
+            controller.canvasSize()?.let { (w, h) ->
+                page.canvasWidthPx = w
+                page.canvasHeightPx = h
+            }
         }
     }
 
@@ -104,6 +116,9 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         isLoading = false
     }
 
+    // PDF import: Android's document picker (Storage Access Framework) surfaces Google
+    // Drive, Nextcloud etc. as sources automatically if those apps are installed — no
+    // separate cloud API integration needed to "import from the cloud".
     val pdfPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -122,6 +137,23 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             }
         }
     }
+
+    // PDF export: same idea in reverse — ACTION_CREATE_DOCUMENT lets the user save
+    // straight into Drive/Nextcloud/local storage, whatever they pick.
+    val pdfExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val doc = document ?: return@rememberLauncherForActivityResult
+        syncCurrentPage()
+        scope.launch(Dispatchers.IO) {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                PdfExporter.export(context, doc, out)
+            }
+        }
+    }
+
+    var showAiMenu by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -145,8 +177,30 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     IconButton(onClick = { pdfPicker.launch(arrayOf("application/pdf")) }) {
                         Icon(Icons.Filled.PictureAsPdf, contentDescription = "PDF importieren")
                     }
+                    IconButton(onClick = {
+                        val name = (document?.name ?: "Notizbuch") + ".pdf"
+                        pdfExportLauncher.launch(name)
+                    }) {
+                        Icon(Icons.Filled.IosShare, contentDescription = "Als PDF exportieren")
+                    }
                     IconButton(onClick = { saveDocument() }) {
                         Icon(Icons.Filled.Save, contentDescription = "Speichern")
+                    }
+                    Box {
+                        IconButton(onClick = { showAiMenu = true }) {
+                            Icon(Icons.Filled.SmartToy, contentDescription = "KI-Assistent")
+                        }
+                        DropdownMenu(expanded = showAiMenu, onDismissRequest = { showAiMenu = false }) {
+                            for (provider in AiProvider.entries) {
+                                DropdownMenuItem(
+                                    text = { Text(provider.label) },
+                                    onClick = {
+                                        showAiMenu = false
+                                        openAiProvider(context, provider)
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             )

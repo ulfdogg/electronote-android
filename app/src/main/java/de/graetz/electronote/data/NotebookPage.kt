@@ -13,12 +13,19 @@ import java.util.UUID
 data class NotebookPage(
     val id: String = UUID.randomUUID().toString(),
     var backgroundImageFile: String? = null,
-    var strokes: List<Stroke> = emptyList()
+    var strokes: List<Stroke> = emptyList(),
+    // Pixel size of the InkCanvasView at the time strokes were last captured. The background
+    // image is always stretched to fill the view, so this is the one reference frame both
+    // strokes and background share — needed to composite them correctly again on export.
+    var canvasWidthPx: Int = 0,
+    var canvasHeightPx: Int = 0
 ) {
     fun toJson(): JSONObject {
         val obj = JSONObject()
         obj.put("id", id)
         obj.put("backgroundImageFile", backgroundImageFile ?: JSONObject.NULL)
+        obj.put("canvasWidthPx", canvasWidthPx)
+        obj.put("canvasHeightPx", canvasHeightPx)
         val strokesArr = JSONArray()
         for (stroke in strokes) {
             val strokeObj = JSONObject()
@@ -63,7 +70,13 @@ data class NotebookPage(
                 }
                 strokes.add(Stroke(points = points, colorArgb = color, widthPx = width))
             }
-            return NotebookPage(id = id, backgroundImageFile = bg, strokes = strokes)
+            return NotebookPage(
+                id = id,
+                backgroundImageFile = bg,
+                strokes = strokes,
+                canvasWidthPx = obj.optInt("canvasWidthPx", 0),
+                canvasHeightPx = obj.optInt("canvasHeightPx", 0)
+            )
         }
     }
 }

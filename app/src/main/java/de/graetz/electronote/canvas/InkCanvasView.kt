@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
@@ -38,13 +37,6 @@ class InkCanvasView @JvmOverloads constructor(
     private var activePointerId: Int = -1
 
     private var backgroundBitmap: Bitmap? = null
-
-    private val strokePaint = Paint().apply {
-        isAntiAlias = true
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
 
     private val backgroundPaint = Paint().apply {
         isAntiAlias = true
@@ -180,27 +172,8 @@ class InkCanvasView @JvmOverloads constructor(
         }
 
         for (stroke in strokes) {
-            drawStroke(canvas, stroke.points, stroke.colorArgb, stroke.widthPx)
+            canvas.drawStroke(stroke)
         }
-        currentPoints?.let { drawStroke(canvas, it, currentColor, currentWidthPx) }
-    }
-
-    private fun drawStroke(canvas: Canvas, points: List<StrokePoint>, color: Int, width: Float) {
-        if (points.isEmpty()) return
-        if (points.size == 1) {
-            // A tap: draw a dot so a single touch is still visible.
-            strokePaint.color = color
-            strokePaint.strokeWidth = width
-            canvas.drawPoint(points[0].x, points[0].y, strokePaint)
-            return
-        }
-        val path = Path()
-        path.moveTo(points[0].x, points[0].y)
-        for (p in points.drop(1)) {
-            path.lineTo(p.x, p.y)
-        }
-        strokePaint.color = color
-        strokePaint.strokeWidth = width
-        canvas.drawPath(path, strokePaint)
+        currentPoints?.let { canvas.drawStroke(Stroke(it, currentColor, currentWidthPx)) }
     }
 }

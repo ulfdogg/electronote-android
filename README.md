@@ -11,11 +11,19 @@ Apples PencilKit/Vision-Frameworks auf Android keine Entsprechung haben.
 - Undo/Redo, Farbauswahl
 - Mehrseitige Notizbücher, lokal gespeichert (App-interner Speicher)
 - PDF-Import (jede Seite wird als Seiten-Hintergrund importiert, Stift schreibt darüber)
+- PDF-Export: Notizbuch wird als PDF gerendert und über Androids Speicherort-Auswahl
+  gespeichert — dort erscheinen Google Drive/Nextcloud automatisch als Ziel, wenn die
+  jeweilige App installiert ist. Keine eigene Cloud-API-Anbindung nötig.
+- KI-Assistent-Button: öffnet ChatGPT/Claude/Gemini in Chrome Custom Tabs (nicht in einer
+  eingebetteten WebView) — Google blockiert sonst "Mit Google anmelden", genau wie bei
+  WKWebView auf iOS. Custom Tabs nutzt die echte, installierte Chrome-Sitzung.
 
 ## Bewusst noch nicht enthalten
 
-Cloud-Sync (Nextcloud/Google Drive), KI-Sidebar, Live-Cast, OCR/Handschrift- & Mathe-Erkennung,
-Formen-Korrektur, Diagramm-Editoren, ClipArt, Web-Clipper — folgt schrittweise.
+Direkte Cloud-Konten-Anbindung (WebDAV/Drive-API mit eigenem Login statt über die
+Speicherort-Auswahl), Live-Cast, OCR/Handschrift- & Mathe-Erkennung, Formen-Korrektur,
+Diagramm-Editoren, ClipArt, Web-Clipper, automatische Seitenübergabe an die KI (setzt OCR
+voraus) — folgt schrittweise.
 
 ## Build
 
