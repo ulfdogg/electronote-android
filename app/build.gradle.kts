@@ -16,6 +16,18 @@ android {
         versionName = "0.4.0"
     }
 
+    signingConfigs {
+        getByName("debug") {
+            // Committed on purpose: without a stable debug key, every GitHub Actions run
+            // signs with a freshly auto-generated one, and reinstalling the next build
+            // over the last fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+            storeFile = file("../keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
