@@ -324,7 +324,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     var showPresetMenu by remember { mutableStateOf(false) }
     var showSavePresetDialog by remember { mutableStateOf(false) }
     var newPresetName by remember { mutableStateOf("") }
-    var presets by remember { mutableStateOf(InkPresetStore.load(context)) }
+    var presets by remember { mutableStateOf<List<InkPreset>>(InkPresetStore.load(context)) }
 
     fun applyPreset(preset: InkPreset) {
         currentTool = preset.tool
