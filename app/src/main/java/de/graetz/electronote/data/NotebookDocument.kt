@@ -24,6 +24,9 @@ data class NotebookDocument(
     var canvasHeightPx: Int = 2200,
     var paperStyle: PaperStyle = PaperStyle.LINED,
     var lineSpacing: LineSpacing = LineSpacing.MEDIUM,
+    // Set once this document has been uploaded to/downloaded from Nextcloud, so later
+    // uploads always land in the same remote folder instead of creating duplicates.
+    var remoteFolderName: String? = null,
     var strokes: MutableList<Stroke> = mutableListOf(),
     var backgrounds: MutableList<PageBackground> = mutableListOf(),
     var textElements: MutableList<TextElement> = mutableListOf(),
@@ -39,6 +42,7 @@ data class NotebookDocument(
         obj.put("canvasHeightPx", canvasHeightPx)
         obj.put("paperStyle", paperStyle.name)
         obj.put("lineSpacing", lineSpacing.name)
+        obj.put("remoteFolderName", remoteFolderName ?: JSONObject.NULL)
 
         val strokesArr = JSONArray()
         for (stroke in strokes) {
@@ -125,6 +129,11 @@ data class NotebookDocument(
                 canvasHeightPx = obj.optInt("canvasHeightPx", 2200),
                 paperStyle = paperStyle,
                 lineSpacing = lineSpacing,
+                remoteFolderName = if (obj.has("remoteFolderName") && !obj.isNull("remoteFolderName")) {
+                    obj.getString("remoteFolderName")
+                } else {
+                    null
+                },
                 strokes = strokes,
                 backgrounds = backgrounds,
                 textElements = textElements,

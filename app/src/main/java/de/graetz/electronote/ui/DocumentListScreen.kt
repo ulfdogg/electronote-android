@@ -11,6 +11,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -35,6 +37,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import de.graetz.electronote.data.NotebookDocumentSummary
 import de.graetz.electronote.data.NotebookStore
+import de.graetz.electronote.nextcloud.NextcloudDownloadDialog
+import de.graetz.electronote.nextcloud.NextcloudLoginDialog
 import java.text.DateFormat
 import java.util.Date
 
@@ -44,6 +48,8 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit) {
     val context = LocalContext.current
     var documents by remember { mutableStateOf(listOf<NotebookDocumentSummary>()) }
     var refreshKey by remember { mutableStateOf(0) }
+    var showNextcloudLogin by remember { mutableStateOf(false) }
+    var showNextcloudDownload by remember { mutableStateOf(false) }
 
     LaunchedEffect(refreshKey) {
         documents = NotebookStore.listDocuments(context)
@@ -54,6 +60,12 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit) {
             TopAppBar(
                 title = { Text("ElectroNote") },
                 actions = {
+                    IconButton(onClick = { showNextcloudDownload = true }) {
+                        Icon(Icons.Filled.CloudDownload, contentDescription = "Von Nextcloud laden")
+                    }
+                    IconButton(onClick = { showNextcloudLogin = true }) {
+                        Icon(Icons.Filled.CloudQueue, contentDescription = "Nextcloud")
+                    }
                     IconButton(onClick = { AppPreferences.toggleDarkMode(context) }) {
                         Icon(
                             if (AppPreferences.isDarkMode) Icons.Filled.DarkMode else Icons.Filled.LightMode,
@@ -136,5 +148,15 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit) {
                 }
             }
         }
+    }
+
+    if (showNextcloudLogin) {
+        NextcloudLoginDialog(onDismiss = { showNextcloudLogin = false })
+    }
+    if (showNextcloudDownload) {
+        NextcloudDownloadDialog(
+            onDismiss = { showNextcloudDownload = false },
+            onDownloaded = { refreshKey++ }
+        )
     }
 }

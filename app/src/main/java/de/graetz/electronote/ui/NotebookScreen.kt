@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -263,6 +264,28 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             .addOnFailureListener { e ->
                 Toast.makeText(context, "Scanner konnte nicht gestartet werden: ${e.message}", Toast.LENGTH_LONG).show()
             }
+    }
+
+    // Nextcloud: explicit, manual upload of the current document — no background sync.
+    // Requires having connected once from the notebook list screen.
+    fun uploadToNextcloud() {
+        val doc = document ?: return
+        val credentials = de.graetz.electronote.nextcloud.NextcloudAuthStore.load(context)
+        if (credentials == null) {
+            Toast.makeText(context, "Bitte zuerst in der Notizbuch-Liste mit Nextcloud verbinden", Toast.LENGTH_LONG).show()
+            return
+        }
+        syncDocumentFromCanvas()
+        scope.launch {
+            val success = withContext(Dispatchers.IO) {
+                de.graetz.electronote.nextcloud.NextcloudSync.upload(context, credentials, doc)
+            }
+            Toast.makeText(
+                context,
+                if (success) "Auf Nextcloud gespeichert" else "Hochladen fehlgeschlagen",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     // OCR
@@ -616,6 +639,12 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         icon = Icons.Filled.Wifi,
                         color = if (LiveCastServer.isStreaming) IosColors.Red else IosColors.Pink,
                         onClick = { showLiveCastSheet = true }
+                    )
+                    ActionPill(
+                        label = "Nextcloud",
+                        icon = Icons.Filled.CloudUpload,
+                        color = IosColors.Cyan,
+                        onClick = { uploadToNextcloud() }
                     )
                 }
             }
