@@ -48,6 +48,8 @@ class InkCanvasView @JvmOverloads constructor(
     var shapeSnapEnabled: Boolean = false
     var paperStyle: PaperStyle = PaperStyle.LINED
         set(value) { field = value; invalidate() }
+    var lineSpacingPx: Float = LineSpacing.MEDIUM.px
+        set(value) { field = value; invalidate() }
     var stylusOnly: Boolean = false
     var selectionModeActive: Boolean = false
         set(value) { field = value; selectionPoints = null; invalidate() }
@@ -99,7 +101,6 @@ class InkCanvasView @JvmOverloads constructor(
         private const val EXTEND_STEP_PX = 1000
         private const val ERASER_RADIUS_PX = 26f
         private const val GRID_STEP_PX = 44f
-        private const val LINE_STEP_PX = 56f
         private const val DOT_STEP_PX = 44f
     }
 
@@ -478,10 +479,10 @@ class InkCanvasView @JvmOverloads constructor(
                 }
             }
             PaperStyle.LINED -> {
-                var y = (top / LINE_STEP_PX).toInt() * LINE_STEP_PX
+                var y = (top / lineSpacingPx).toInt() * lineSpacingPx
                 while (y < bottom) {
                     canvas.drawLine(0f, y, right, y, gridPaint)
-                    y += LINE_STEP_PX
+                    y += lineSpacingPx
                 }
             }
             PaperStyle.DOTTED -> {

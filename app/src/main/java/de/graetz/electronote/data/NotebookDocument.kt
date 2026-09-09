@@ -1,5 +1,6 @@
 package de.graetz.electronote.data
 
+import de.graetz.electronote.canvas.LineSpacing
 import de.graetz.electronote.canvas.PaperStyle
 import de.graetz.electronote.canvas.Stroke
 import de.graetz.electronote.canvas.StrokePoint
@@ -22,6 +23,7 @@ data class NotebookDocument(
     var canvasWidthPx: Int = 0,
     var canvasHeightPx: Int = 2200,
     var paperStyle: PaperStyle = PaperStyle.LINED,
+    var lineSpacing: LineSpacing = LineSpacing.MEDIUM,
     var strokes: MutableList<Stroke> = mutableListOf(),
     var backgrounds: MutableList<PageBackground> = mutableListOf(),
     var textElements: MutableList<TextElement> = mutableListOf(),
@@ -36,6 +38,7 @@ data class NotebookDocument(
         obj.put("canvasWidthPx", canvasWidthPx)
         obj.put("canvasHeightPx", canvasHeightPx)
         obj.put("paperStyle", paperStyle.name)
+        obj.put("lineSpacing", lineSpacing.name)
 
         val strokesArr = JSONArray()
         for (stroke in strokes) {
@@ -107,6 +110,11 @@ data class NotebookDocument(
             } catch (e: IllegalArgumentException) {
                 PaperStyle.LINED
             }
+            val lineSpacing = try {
+                LineSpacing.valueOf(obj.optString("lineSpacing", LineSpacing.MEDIUM.name))
+            } catch (e: IllegalArgumentException) {
+                LineSpacing.MEDIUM
+            }
 
             return NotebookDocument(
                 id = obj.optString("id", UUID.randomUUID().toString()),
@@ -116,6 +124,7 @@ data class NotebookDocument(
                 canvasWidthPx = obj.optInt("canvasWidthPx", 0),
                 canvasHeightPx = obj.optInt("canvasHeightPx", 2200),
                 paperStyle = paperStyle,
+                lineSpacing = lineSpacing,
                 strokes = strokes,
                 backgrounds = backgrounds,
                 textElements = textElements,

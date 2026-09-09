@@ -29,11 +29,13 @@ import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.ModeEditOutline
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SmartToy
@@ -46,6 +48,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -78,6 +81,9 @@ import de.graetz.electronote.ai.openAiProvider
 import de.graetz.electronote.canvas.DrawTool
 import de.graetz.electronote.canvas.InkCanvas
 import de.graetz.electronote.canvas.InkCanvasController
+import de.graetz.electronote.canvas.InkPreset
+import de.graetz.electronote.canvas.InkPresetStore
+import de.graetz.electronote.canvas.LineSpacing
 import de.graetz.electronote.canvas.PaperStyle
 import de.graetz.electronote.canvas.StickyNoteElement
 import de.graetz.electronote.canvas.TextElement
@@ -310,15 +316,31 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     var shapeSnapEnabled by remember { mutableStateOf(false) }
     var selectedWidthPx by remember { mutableStateOf(STROKE_WIDTHS[1]) }
     var paperStyle by remember { mutableStateOf(PaperStyle.LINED) }
+    var selectedLineSpacing by remember { mutableStateOf(LineSpacing.MEDIUM) }
     var showAiMenu by remember { mutableStateOf(false) }
     var showInsertMenu by remember { mutableStateOf(false) }
     var showPaperMenu by remember { mutableStateOf(false) }
     var showLiveCastSheet by remember { mutableStateOf(false) }
+    var showPresetMenu by remember { mutableStateOf(false) }
+    var showSavePresetDialog by remember { mutableStateOf(false) }
+    var newPresetName by remember { mutableStateOf("") }
+    var presets by remember { mutableStateOf(InkPresetStore.load(context)) }
+
+    fun applyPreset(preset: InkPreset) {
+        currentTool = preset.tool
+        controller.setTool(preset.tool)
+        selectedColorArgb = preset.colorArgb
+        controller.setColor(preset.colorArgb)
+        selectedWidthPx = preset.widthPx
+        controller.setWidthPx(preset.widthPx)
+    }
 
     LaunchedEffect(document?.id) {
         document?.let {
             paperStyle = it.paperStyle
             controller.setPaperStyle(it.paperStyle)
+            selectedLineSpacing = it.lineSpacing
+            controller.setLineSpacing(it.lineSpacing.px)
         }
     }
 
@@ -433,6 +455,9 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             for (style in PaperStyle.entries) {
                                 DropdownMenuItem(
                                     text = { Text(style.label()) },
+                                    trailingIcon = {
+                                        if (paperStyle == style) Icon(Icons.Filled.Check, contentDescription = null)
+                                    },
                                     onClick = {
                                         showPaperMenu = false
                                         paperStyle = style
@@ -441,6 +466,69 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                                     }
                                 )
                             }
+                            HorizontalDivider()
+                            Text(
+                                "Zeilenabstand",
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                            for (spacing in LineSpacing.entries) {
+                                DropdownMenuItem(
+                                    text = { Text(spacing.label) },
+                                    trailingIcon = {
+                                        if (selectedLineSpacing == spacing) Icon(Icons.Filled.Check, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        showPaperMenu = false
+                                        selectedLineSpacing = spacing
+                                        controller.setLineSpacing(spacing.px)
+                                        document?.lineSpacing = spacing
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Box {
+                        IconButton(onClick = { showPresetMenu = true }) {
+                            Icon(Icons.Filled.Palette, contentDescription = "Stift-Presets")
+                        }
+                        DropdownMenu(expanded = showPresetMenu, onDismissRequest = { showPresetMenu = false }) {
+                            for (preset in presets) {
+                                DropdownMenuItem(
+                                    text = { Text(preset.name) },
+                                    leadingIcon = {
+                                        Box(
+                                            Modifier
+                                                .size(18.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(preset.colorArgb))
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        IconButton(onClick = {
+                                            val updated = presets.filterNot { it.id == preset.id }
+                                            presets = updated
+                                            InkPresetStore.save(context, updated)
+                                        }) {
+                                            Icon(Icons.Filled.Delete, contentDescription = "Löschen")
+                                        }
+                                    },
+                                    onClick = {
+                                        showPresetMenu = false
+                                        applyPreset(preset)
+                                    }
+                                )
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Aktuellen Stift speichern…") },
+                                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                                onClick = {
+                                    showPresetMenu = false
+                                    showSavePresetDialog = true
+                                }
+                            )
                         }
                     }
                 }
@@ -688,6 +776,40 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     }) { Text("Löschen") }
                     TextButton(onClick = { editingStickyNote = null }) { Text("Abbrechen") }
                 }
+            }
+        )
+    }
+
+    if (showSavePresetDialog) {
+        AlertDialog(
+            onDismissRequest = { showSavePresetDialog = false; newPresetName = "" },
+            title = { Text("Preset speichern") },
+            text = {
+                OutlinedTextField(
+                    value = newPresetName,
+                    onValueChange = { newPresetName = it },
+                    placeholder = { Text("Name…") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newPresetName.isNotBlank()) {
+                        val preset = InkPreset(
+                            name = newPresetName,
+                            tool = currentTool,
+                            colorArgb = selectedColorArgb,
+                            widthPx = selectedWidthPx
+                        )
+                        val updated = presets + preset
+                        presets = updated
+                        InkPresetStore.save(context, updated)
+                    }
+                    newPresetName = ""
+                    showSavePresetDialog = false
+                }) { Text("Speichern") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSavePresetDialog = false; newPresetName = "" }) { Text("Abbrechen") }
             }
         )
     }

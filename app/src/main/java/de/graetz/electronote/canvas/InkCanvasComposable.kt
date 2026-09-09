@@ -81,6 +81,7 @@ class InkCanvasController {
     fun setTool(tool: DrawTool) { view?.currentTool = tool }
     fun setShapeSnapEnabled(enabled: Boolean) { view?.shapeSnapEnabled = enabled }
     fun setPaperStyle(style: PaperStyle) { view?.paperStyle = style }
+    fun setLineSpacing(px: Float) { view?.lineSpacingPx = px }
     fun setDarkPaper(dark: Boolean) { view?.setDarkPaper(dark) }
     fun setBackgroundLayers(layers: List<Pair<PageBackground, Bitmap?>>) {
         view?.setBackgroundLayers(layers)
