@@ -4,7 +4,8 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Σ mark, matching the iPad app's icon (blue background, white Sigma). -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M30,26 L78,26 L78,38 L46,38 L46,48 L72,48 L72,60 L46,60 L46,70 L78,70 L78,82 L30,82 Z" />
+        android:pathData="M26,26 L82,26 L82,39 L47,54 L82,69 L82,82 L26,82 L26,69 L61,54 L26,39 Z" />
 </vector>

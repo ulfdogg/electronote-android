@@ -14,18 +14,22 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudUpload
@@ -35,6 +39,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.LineWeight
 import androidx.compose.material.icons.filled.ModeEditOutline
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Redo
@@ -73,6 +78,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanner
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
@@ -343,6 +349,8 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     var showAiMenu by remember { mutableStateOf(false) }
     var showInsertMenu by remember { mutableStateOf(false) }
     var showPaperMenu by remember { mutableStateOf(false) }
+    var showColorMenu by remember { mutableStateOf(false) }
+    var showWidthMenu by remember { mutableStateOf(false) }
     var showLiveCastSheet by remember { mutableStateOf(false) }
     var showPresetMenu by remember { mutableStateOf(false) }
     var showSavePresetDialog by remember { mutableStateOf(false) }
@@ -415,148 +423,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     }
                 )
 
-                // Row 2: Werkzeug (Stift/Marker/Bleistift/Radierer), Strichstärke,
-                // Formen-Korrektur, Papiervorlage — everything about *how* you're drawing.
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    ToolToggle(Icons.Filled.Edit, "Stift", currentTool == DrawTool.PEN) {
-                        currentTool = DrawTool.PEN; controller.setTool(DrawTool.PEN)
-                    }
-                    ToolToggle(Icons.Filled.Brush, "Marker", currentTool == DrawTool.MARKER) {
-                        currentTool = DrawTool.MARKER; controller.setTool(DrawTool.MARKER)
-                    }
-                    ToolToggle(Icons.Filled.ModeEditOutline, "Bleistift", currentTool == DrawTool.PENCIL) {
-                        currentTool = DrawTool.PENCIL; controller.setTool(DrawTool.PENCIL)
-                    }
-                    ToolToggle(Icons.Filled.Backspace, "Radierer", currentTool == DrawTool.ERASER) {
-                        currentTool = DrawTool.ERASER; controller.setTool(DrawTool.ERASER)
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
-                        for (w in STROKE_WIDTHS) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .padding(3.dp)
-                                    .size(26.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (selectedWidthPx == w) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                        else Color.Transparent
-                                    )
-                                    .clickable {
-                                        selectedWidthPx = w
-                                        controller.setWidthPx(w)
-                                    }
-                            ) {
-                                Box(
-                                    Modifier
-                                        .size((w / 1.2f).dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.onSurface)
-                                )
-                            }
-                        }
-                    }
-
-                    ToolToggle(Icons.Filled.AutoFixHigh, "Formen", shapeSnapEnabled) {
-                        shapeSnapEnabled = !shapeSnapEnabled
-                        controller.setShapeSnapEnabled(shapeSnapEnabled)
-                    }
-
-                    Box {
-                        IconButton(onClick = { showPaperMenu = true }) {
-                            Icon(Icons.Filled.GridOn, contentDescription = "Papiervorlage")
-                        }
-                        DropdownMenu(expanded = showPaperMenu, onDismissRequest = { showPaperMenu = false }) {
-                            for (style in PaperStyle.entries) {
-                                DropdownMenuItem(
-                                    text = { Text(style.label()) },
-                                    trailingIcon = {
-                                        if (paperStyle == style) Icon(Icons.Filled.Check, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        showPaperMenu = false
-                                        paperStyle = style
-                                        controller.setPaperStyle(style)
-                                        document?.paperStyle = style
-                                    }
-                                )
-                            }
-                            HorizontalDivider()
-                            Text(
-                                "Zeilenabstand",
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                            )
-                            for (spacing in LineSpacing.entries) {
-                                DropdownMenuItem(
-                                    text = { Text(spacing.label) },
-                                    trailingIcon = {
-                                        if (selectedLineSpacing == spacing) Icon(Icons.Filled.Check, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        showPaperMenu = false
-                                        selectedLineSpacing = spacing
-                                        controller.setLineSpacing(spacing.px)
-                                        document?.lineSpacing = spacing
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    Box {
-                        IconButton(onClick = { showPresetMenu = true }) {
-                            Icon(Icons.Filled.Palette, contentDescription = "Stift-Presets")
-                        }
-                        DropdownMenu(expanded = showPresetMenu, onDismissRequest = { showPresetMenu = false }) {
-                            for (preset in presets) {
-                                DropdownMenuItem(
-                                    text = { Text(preset.name) },
-                                    leadingIcon = {
-                                        Box(
-                                            Modifier
-                                                .size(18.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(preset.colorArgb))
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        IconButton(onClick = {
-                                            val updated = presets.filterNot { it.id == preset.id }
-                                            presets = updated
-                                            InkPresetStore.save(context, updated)
-                                        }) {
-                                            Icon(Icons.Filled.Delete, contentDescription = "Löschen")
-                                        }
-                                    },
-                                    onClick = {
-                                        showPresetMenu = false
-                                        applyPreset(preset)
-                                    }
-                                )
-                            }
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("Aktuellen Stift speichern…") },
-                                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                                onClick = {
-                                    showPresetMenu = false
-                                    showSavePresetDialog = true
-                                }
-                            )
-                        }
-                    }
-                }
-
-                // Row 3: colorful action pills — Einfügen/Exportieren/Text/Haftzettel/
+                // Action pills — Einfügen/Exportieren/Text/Haftzettel/
                 // Text erkennen/Live-Übertragung.
                 Row(
                     modifier = Modifier
@@ -648,50 +515,190 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     )
                 }
             }
-        },
-        bottomBar = {
-            if (document != null) {
-                Row(
+        }
+    ) { padding ->
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            if (!isLoading && document != null) {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .width(76.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    for (c in PALETTE) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .padding(4.dp)
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(Color(c))
-                                .clickable {
-                                    selectedColorArgb = c
-                                    controller.setColor(c)
-                                }
-                        ) {
-                            if (selectedColorArgb == c) {
-                                Icon(
-                                    Icons.Filled.Check,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
+                    SidebarButton(Icons.Filled.Edit, "Stift", currentTool == DrawTool.PEN) {
+                        currentTool = DrawTool.PEN; controller.setTool(DrawTool.PEN)
+                    }
+                    SidebarButton(Icons.Filled.Brush, "Marker", currentTool == DrawTool.MARKER) {
+                        currentTool = DrawTool.MARKER; controller.setTool(DrawTool.MARKER)
+                    }
+                    SidebarButton(Icons.Filled.ModeEditOutline, "Bleistift", currentTool == DrawTool.PENCIL) {
+                        currentTool = DrawTool.PENCIL; controller.setTool(DrawTool.PENCIL)
+                    }
+                    SidebarButton(Icons.Filled.Backspace, "Radierer", currentTool == DrawTool.ERASER) {
+                        currentTool = DrawTool.ERASER; controller.setTool(DrawTool.ERASER)
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp, horizontal = 14.dp))
+
+                    Box {
+                        SidebarButton(Icons.Filled.Palette, "Farbe", false, tint = Color(selectedColorArgb)) {
+                            showColorMenu = true
+                        }
+                        DropdownMenu(expanded = showColorMenu, onDismissRequest = { showColorMenu = false }) {
+                            for (c in PALETTE) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Box(Modifier.size(20.dp).clip(CircleShape).background(Color(c)))
+                                    },
+                                    trailingIcon = {
+                                        if (selectedColorArgb == c) Icon(Icons.Filled.Check, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        showColorMenu = false
+                                        selectedColorArgb = c
+                                        controller.setColor(c)
+                                    }
                                 )
                             }
                         }
                     }
+
+                    Box {
+                        SidebarButton(Icons.Filled.LineWeight, "Stärke", false) {
+                            showWidthMenu = true
+                        }
+                        DropdownMenu(expanded = showWidthMenu, onDismissRequest = { showWidthMenu = false }) {
+                            for (w in STROKE_WIDTHS) {
+                                DropdownMenuItem(
+                                    text = { Text("${w}pt") },
+                                    leadingIcon = {
+                                        Box(
+                                            Modifier
+                                                .size((w / 1.2f).dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.onSurface)
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        if (selectedWidthPx == w) Icon(Icons.Filled.Check, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        showWidthMenu = false
+                                        selectedWidthPx = w
+                                        controller.setWidthPx(w)
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp, horizontal = 14.dp))
+
+                    SidebarButton(Icons.Filled.AutoFixHigh, "Formen", shapeSnapEnabled) {
+                        shapeSnapEnabled = !shapeSnapEnabled
+                        controller.setShapeSnapEnabled(shapeSnapEnabled)
+                    }
+
+                    Box {
+                        SidebarButton(Icons.Filled.GridOn, "Papier", false) { showPaperMenu = true }
+                        DropdownMenu(expanded = showPaperMenu, onDismissRequest = { showPaperMenu = false }) {
+                            for (style in PaperStyle.entries) {
+                                DropdownMenuItem(
+                                    text = { Text(style.label()) },
+                                    trailingIcon = {
+                                        if (paperStyle == style) Icon(Icons.Filled.Check, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        showPaperMenu = false
+                                        paperStyle = style
+                                        controller.setPaperStyle(style)
+                                        document?.paperStyle = style
+                                    }
+                                )
+                            }
+                            HorizontalDivider()
+                            Text(
+                                "Zeilenabstand",
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                            for (spacing in LineSpacing.entries) {
+                                DropdownMenuItem(
+                                    text = { Text(spacing.label) },
+                                    trailingIcon = {
+                                        if (selectedLineSpacing == spacing) Icon(Icons.Filled.Check, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        showPaperMenu = false
+                                        selectedLineSpacing = spacing
+                                        controller.setLineSpacing(spacing.px)
+                                        document?.lineSpacing = spacing
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Box {
+                        SidebarButton(Icons.Filled.Bookmarks, "Presets", false) { showPresetMenu = true }
+                        DropdownMenu(expanded = showPresetMenu, onDismissRequest = { showPresetMenu = false }) {
+                            for (preset in presets) {
+                                DropdownMenuItem(
+                                    text = { Text(preset.name) },
+                                    leadingIcon = {
+                                        Box(
+                                            Modifier
+                                                .size(18.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(preset.colorArgb))
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        IconButton(onClick = {
+                                            val updated = presets.filterNot { it.id == preset.id }
+                                            presets = updated
+                                            InkPresetStore.save(context, updated)
+                                        }) {
+                                            Icon(Icons.Filled.Delete, contentDescription = "Löschen")
+                                        }
+                                    },
+                                    onClick = {
+                                        showPresetMenu = false
+                                        applyPreset(preset)
+                                    }
+                                )
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Aktuellen Stift speichern…") },
+                                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                                onClick = {
+                                    showPresetMenu = false
+                                    showSavePresetDialog = true
+                                }
+                            )
+                        }
+                    }
                 }
             }
-        }
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(scrollState)
-        ) {
-            if (!isLoading && document != null) {
-                InkCanvas(controller = controller, modifier = Modifier.fillMaxWidth())
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(scrollState)
+            ) {
+                if (!isLoading && document != null) {
+                    InkCanvas(controller = controller, modifier = Modifier.fillMaxWidth())
+                }
             }
         }
     }
@@ -844,21 +851,43 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     }
 }
 
+// A single icon+caption entry in the left tool sidebar — the vertical, tablet-native
+// counterpart to the iPad app's horizontal tool row.
 @Composable
-private fun ToolToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
-    Box(
-        contentAlignment = Alignment.Center,
+private fun SidebarButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    active: Boolean,
+    tint: Color? = null,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .padding(2.dp)
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent)
+            .padding(vertical = 3.dp)
+            .width(72.dp)
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
+            .padding(vertical = 6.dp)
     ) {
-        Icon(
-            icon,
-            contentDescription = label,
-            tint = if (active) Color.White else MaterialTheme.colorScheme.onSurface
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent)
+        ) {
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = tint ?: if (active) Color.White else MaterialTheme.colorScheme.onSurface
+            )
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
+            maxLines = 1
         )
     }
 }
