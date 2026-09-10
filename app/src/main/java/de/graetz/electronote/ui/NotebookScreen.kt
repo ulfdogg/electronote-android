@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -726,7 +727,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            Column {
+            Column(modifier = Modifier.statusBarsPadding()) {
                 // Compact custom top row (not Material3's TopAppBar, which enforces a
                 // taller 64dp minimum) with smaller icon glyphs — matches the iPad app's
                 // denser, more compact toolbar proportions.
