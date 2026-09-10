@@ -1,6 +1,7 @@
 package de.graetz.electronote.data
 
 import de.graetz.electronote.canvas.Bookmark
+import de.graetz.electronote.canvas.ImageElement
 import de.graetz.electronote.canvas.LineSpacing
 import de.graetz.electronote.canvas.PaperStyle
 import de.graetz.electronote.canvas.Stroke
@@ -37,7 +38,11 @@ data class NotebookDocument(
     var tags: MutableList<String> = mutableListOf(),
     // Soft-delete: set when moved to trash, cleared on restore. Documents with a non-null
     // value are hidden from the normal list but recoverable until permanently deleted.
-    var deletedAt: Long? = null
+    var deletedAt: Long? = null,
+    var imageElements: MutableList<ImageElement> = mutableListOf(),
+    // Plain text extracted from this document (typed text + OCR'd handwriting) for the
+    // cross-notebook search screen. Rebuilt in the background on save.
+    var searchText: String = ""
 ) {
     fun toJson(): JSONObject {
         val obj = JSONObject()
@@ -76,6 +81,8 @@ data class NotebookDocument(
         obj.put("isFavorite", isFavorite)
         obj.put("tags", JSONArray(tags))
         obj.put("deletedAt", deletedAt ?: JSONObject.NULL)
+        obj.put("imageElements", JSONArray(imageElements.map { it.toJson() }))
+        obj.put("searchText", searchText)
         return obj
     }
 
@@ -132,6 +139,12 @@ data class NotebookDocument(
                 tags.add(tagsArr.getString(i))
             }
 
+            val imageArr = obj.optJSONArray("imageElements") ?: JSONArray()
+            val imageElements = mutableListOf<ImageElement>()
+            for (i in 0 until imageArr.length()) {
+                imageElements.add(ImageElement.fromJson(imageArr.getJSONObject(i)))
+            }
+
             val paperStyle = try {
                 PaperStyle.valueOf(obj.optString("paperStyle", PaperStyle.LINED.name))
             } catch (e: IllegalArgumentException) {
@@ -164,7 +177,9 @@ data class NotebookDocument(
                 bookmarks = bookmarks,
                 isFavorite = obj.optBoolean("isFavorite", false),
                 tags = tags,
-                deletedAt = if (obj.has("deletedAt") && !obj.isNull("deletedAt")) obj.getLong("deletedAt") else null
+                deletedAt = if (obj.has("deletedAt") && !obj.isNull("deletedAt")) obj.getLong("deletedAt") else null,
+                imageElements = imageElements,
+                searchText = obj.optString("searchText", "")
             )
         }
     }
@@ -177,5 +192,6 @@ data class NotebookDocumentSummary(
     val updatedAt: Long,
     val isFavorite: Boolean = false,
     val tags: List<String> = emptyList(),
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+    val searchText: String = ""
 )

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
@@ -58,7 +59,7 @@ import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit) {
+fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit, onOpenSearch: () -> Unit) {
     val context = LocalContext.current
     var documents by remember { mutableStateOf(listOf<NotebookDocumentSummary>()) }
     var refreshKey by remember { mutableStateOf(0) }
@@ -79,6 +80,9 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
             TopAppBar(
                 title = { Text("ElectroNote") },
                 actions = {
+                    IconButton(onClick = onOpenSearch) {
+                        Icon(Icons.Filled.Search, contentDescription = "Suchen")
+                    }
                     IconButton(onClick = onOpenTrash) {
                         Icon(Icons.Filled.DeleteSweep, contentDescription = "Papierkorb")
                     }

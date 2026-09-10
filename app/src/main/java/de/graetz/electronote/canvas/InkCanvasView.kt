@@ -17,7 +17,7 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
-enum class PlacementMode { NONE, TEXT, STICKY }
+enum class PlacementMode { NONE, TEXT, STICKY, IMAGE }
 
 /**
  * A continuous, tall handwriting canvas — one per notebook, meant to live inside a
@@ -42,6 +42,8 @@ class InkCanvasView @JvmOverloads constructor(
     var onTextElementTapped: ((TextElement) -> Unit)? = null
     var onStickyNoteTapped: ((StickyNoteElement) -> Unit)? = null
     var onToolChangeRequested: ((DrawTool) -> Unit)? = null
+    var onImagePlacementRequested: ((Float, Float) -> Unit)? = null
+    var onImageElementTapped: ((ImageElement) -> Unit)? = null
 
     var currentTool: DrawTool = DrawTool.PEN
     var currentColor: Int = Color.BLACK
@@ -65,6 +67,7 @@ class InkCanvasView @JvmOverloads constructor(
     private val backgroundLayers = mutableListOf<Pair<PageBackground, Bitmap?>>()
     private val textElements = mutableListOf<TextElement>()
     private val stickyNotes = mutableListOf<StickyNoteElement>()
+    private val imageElements = mutableListOf<Pair<ImageElement, Bitmap?>>()
 
     private val backgroundPaint = Paint().apply { isAntiAlias = true; isFilterBitmap = true }
     private val gridPaint = Paint().apply {
@@ -102,6 +105,22 @@ class InkCanvasView @JvmOverloads constructor(
     }
     private var lastEraserPoint: StrokePoint? = null
     private var toolBeforeStylusEraser: DrawTool? = null
+
+    private val imagePlaceholderPaint = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.FILL
+        color = Color.parseColor("#E0E0E0")
+    }
+    private val playBadgeCirclePaint = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.FILL
+        color = Color.parseColor("#CC000000")
+    }
+    private val playBadgeTrianglePaint = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
 
     companion object {
         private const val EXTEND_MARGIN_PX = 320f
@@ -154,9 +173,16 @@ class InkCanvasView @JvmOverloads constructor(
         invalidate()
     }
 
+    fun setImageElements(elements: List<Pair<ImageElement, Bitmap?>>) {
+        imageElements.clear()
+        imageElements.addAll(elements)
+        invalidate()
+    }
+
     fun getStrokes(): List<Stroke> = strokes.toList()
     fun getTextElements(): List<TextElement> = textElements.toList()
     fun getStickyNotes(): List<StickyNoteElement> = stickyNotes.toList()
+    fun getImageElements(): List<ImageElement> = imageElements.map { it.first }
 
     fun addTextElement(element: TextElement) {
         textElements.add(element)
@@ -183,6 +209,16 @@ class InkCanvasView @JvmOverloads constructor(
         } else if (newText != null) {
             stickyNotes.find { it.id == id }?.text = newText
         }
+        invalidate()
+    }
+
+    fun addImageElement(element: ImageElement, bitmap: Bitmap?) {
+        imageElements.add(element to bitmap)
+        invalidate()
+    }
+
+    fun removeImageElement(id: String) {
+        imageElements.removeAll { it.first.id == id }
         invalidate()
     }
 
@@ -242,6 +278,7 @@ class InkCanvasView @JvmOverloads constructor(
                 when (mode) {
                     PlacementMode.TEXT -> onTextPlacementRequested?.invoke(event.x, event.y)
                     PlacementMode.STICKY -> onStickyPlacementRequested?.invoke(event.x, event.y)
+                    PlacementMode.IMAGE -> onImagePlacementRequested?.invoke(event.x, event.y)
                     PlacementMode.NONE -> {}
                 }
             }
@@ -261,6 +298,11 @@ class InkCanvasView @JvmOverloads constructor(
             val hitSticky = stickyNotes.lastOrNull { hitTestSticky(it, event.x, event.y) }
             if (hitSticky != null) {
                 onStickyNoteTapped?.invoke(hitSticky)
+                return true
+            }
+            val hitImage = imageElements.map { it.first }.lastOrNull { hitTestImage(it, event.x, event.y) }
+            if (hitImage != null) {
+                onImageElementTapped?.invoke(hitImage)
                 return true
             }
         }
@@ -331,6 +373,9 @@ class InkCanvasView @JvmOverloads constructor(
     private fun hitTestSticky(s: StickyNoteElement, x: Float, y: Float): Boolean =
         x >= s.x && x <= s.x + STICKY_NOTE_SIZE_PX && y >= s.y && y <= s.y + STICKY_NOTE_SIZE_PX
 
+    private fun hitTestImage(img: ImageElement, x: Float, y: Float): Boolean =
+        x >= img.x && x <= img.x + img.widthPx && y >= img.y && y <= img.y + img.heightPx
+
     // MARK: - Eraser
 
     private fun handleEraserTouch(event: MotionEvent): Boolean {
@@ -355,6 +400,7 @@ class InkCanvasView @JvmOverloads constructor(
         strokes.removeAll { stroke -> stroke.points.any { hypot((it.x - x).toDouble(), (it.y - y).toDouble()) < ERASER_RADIUS_PX } }
         textElements.removeAll { hitTestText(it, x, y) }
         stickyNotes.removeAll { hitTestSticky(it, x, y) }
+        imageElements.removeAll { hitTestImage(it.first, x, y) }
         if (strokes.size != before) {
             redoStack.clear()
             notifyChanged()
@@ -557,6 +603,27 @@ class InkCanvasView @JvmOverloads constructor(
         for (stroke in strokes) canvas.drawStroke(stroke)
         currentPoints?.let {
             canvas.drawStroke(Stroke(it, colorForCurrentTool(), widthForCurrentTool()))
+        }
+
+        for ((img, bmp) in imageElements) {
+            val dst = RectF(img.x, img.y, img.x + img.widthPx, img.y + img.heightPx)
+            if (bmp != null) {
+                canvas.drawBitmap(bmp, null, dst, backgroundPaint)
+            } else {
+                canvas.drawRect(dst, imagePlaceholderPaint)
+            }
+            if (img.kind == ImageElement.KIND_VIDEO || img.kind == ImageElement.KIND_YOUTUBE) {
+                val cx = dst.centerX()
+                val cy = dst.centerY()
+                val r = min(dst.width(), dst.height()) * 0.18f
+                canvas.drawCircle(cx, cy, r, playBadgeCirclePaint)
+                val path = Path()
+                path.moveTo(cx - r * 0.35f, cy - r * 0.5f)
+                path.lineTo(cx - r * 0.35f, cy + r * 0.5f)
+                path.lineTo(cx + r * 0.5f, cy)
+                path.close()
+                canvas.drawPath(path, playBadgeTrianglePaint)
+            }
         }
 
         for (text in textElements) canvas.drawTextElement(text)

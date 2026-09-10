@@ -39,13 +39,26 @@ Apples PencilKit/Vision-Frameworks auf Android keine Entsprechung haben.
   eingefügt.
 - Nextcloud: browserbasierter Login (Login Flow v2, kein manuelles WebDAV-Passwort),
   manueller Upload/Download eines Notizbuchs (kein automatischer Hintergrund-Abgleich)
+- Mathe-Modul: Taschenrechner, Handschrift-Formel-Erkennung (Lasso-Auswahl → Rechner),
+  Funktionsplotter (als Bild einfügbar)
+- Elektro-Bauteil-Bibliothek: 24 vereinfachte Schaltzeichen in 6 Kategorien, durchsuchbar,
+  zum Einfügen; eingebetteter Schaltungs-Simulator (elektrosimulator.de), Schaltbild als
+  Bild aus dem Simulator übernehmbar
+- Video einfügen: Kamera-Aufnahme, Galerie-Import, YouTube-Link-Einbettung — abspielbar
+  direkt im Notizbuch (Tippen auf das Vorschaubild)
+- Volltextsuche über alle Notizbücher (Namen, Tags, getippter Text, Haftzettel, sowie
+  OCR-erkannte Handschrift — indiziert beim Verlassen eines Notizbuchs)
 
 ## Bewusst noch nicht enthalten
 
-Mathe-Erkennung, Diagramm-Editoren (Ablaufplan/MindMap), Whiteboard-Modus,
-Elektro-Bauteil-Bibliothek/Schaltungs-Simulator, ClipArt, Web-Clipper,
-Volltextsuche über Notizen, iCloud-/Google-Drive-Sync, eigener PDF-Betrachter,
-Video-Import/YouTube-Einbettung, Lineal — folgt schrittweise nach Priorität.
+Diagramm-Editoren (Ablaufplan/MindMap), Whiteboard-Modus, ClipArt-Bibliothek,
+Web-Clipper, iCloud-/Google-Drive-Sync, eigener PDF-Betrachter, Lineal —
+folgt schrittweise nach Priorität.
+
+Bewusste Vereinfachungen: die Elektro-Bibliothek zeichnet 24 gängige Symbole selbst
+(nicht DIN-exakt, aber erkennbar) statt aller ~50 iOS-Symbole; der Schaltungs-Simulator
+ist ein extern gehosteter Web-Dienst, dessen "Bild übernehmen"-Rückkanal auf einem
+JS-Bridge-Polyfill beruht und könnte brechen, falls die Website ihre Bridge ändert.
 
 ## Build
 

@@ -2,4 +2,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Exported PDFs are written here before being handed to the share sheet. -->
     <cache-path name="shared" path="shared/" />
+    <!-- Camera video capture writes here before being copied into the document folder. -->
+    <cache-path name="camera" path="camera/" />
 </paths>

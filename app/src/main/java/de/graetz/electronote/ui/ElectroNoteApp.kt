@@ -37,16 +37,23 @@ fun ElectroNoteApp() {
             }
 
             var showTrash by remember { mutableStateOf(false) }
+            var showSearch by remember { mutableStateOf(false) }
 
             val documentId = openDocumentId
             if (documentId != null) {
                 NotebookScreen(documentId = documentId, onBack = { openDocumentId = null })
             } else if (showTrash) {
                 TrashScreen(onBack = { showTrash = false })
+            } else if (showSearch) {
+                SearchScreen(
+                    onBack = { showSearch = false },
+                    onOpenDocument = { showSearch = false; openDocumentId = it }
+                )
             } else {
                 DocumentListScreen(
                     onOpenDocument = { openDocumentId = it },
-                    onOpenTrash = { showTrash = true }
+                    onOpenTrash = { showTrash = true },
+                    onOpenSearch = { showSearch = true }
                 )
             }
         }

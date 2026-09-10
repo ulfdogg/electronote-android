@@ -3,9 +3,11 @@ package de.graetz.electronote.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 
 /**
  * Saves/loads [NotebookDocument]s to app-internal storage. Each document lives in its
@@ -33,7 +35,8 @@ object NotebookStore {
                 updatedAt = obj.optLong("updatedAt", jsonFile.lastModified()),
                 isFavorite = obj.optBoolean("isFavorite", false),
                 tags = tags,
-                deletedAt = if (obj.has("deletedAt") && !obj.isNull("deletedAt")) obj.getLong("deletedAt") else null
+                deletedAt = if (obj.has("deletedAt") && !obj.isNull("deletedAt")) obj.getLong("deletedAt") else null,
+                searchText = obj.optString("searchText", "")
             )
         }.getOrNull()
     }
@@ -120,4 +123,22 @@ object NotebookStore {
         if (!file.exists()) return null
         return BitmapFactory.decodeFile(file.absolutePath)
     }
+
+    /** Copies a picked/recorded video into the document's own videos/ folder. */
+    fun saveVideoFile(context: Context, documentId: String, sourceUri: Uri, extension: String = "mp4"): String? {
+        val videosDir = File(documentDir(context, documentId), "videos").apply { mkdirs() }
+        val filename = "${UUID.randomUUID()}.$extension"
+        val dest = File(videosDir, filename)
+        return try {
+            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                FileOutputStream(dest).use { output -> input.copyTo(output) }
+            } ?: return null
+            "videos/$filename"
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun videoFile(context: Context, documentId: String, relativeFilename: String): File =
+        File(documentDir(context, documentId), relativeFilename)
 }

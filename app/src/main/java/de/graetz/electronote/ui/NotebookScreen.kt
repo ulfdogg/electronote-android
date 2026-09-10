@@ -2,7 +2,11 @@ package de.graetz.electronote.ui
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color as AndroidColor
+import android.graphics.RectF
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -38,6 +42,8 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ElectricBolt
+import androidx.compose.material.icons.filled.Functions
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.LightMode
@@ -91,6 +97,7 @@ import de.graetz.electronote.ai.AiProvider
 import de.graetz.electronote.ai.openAiProvider
 import de.graetz.electronote.canvas.Bookmark
 import de.graetz.electronote.canvas.DrawTool
+import de.graetz.electronote.canvas.ImageElement
 import de.graetz.electronote.canvas.InkCanvas
 import de.graetz.electronote.canvas.InkCanvasController
 import de.graetz.electronote.canvas.InkPreset
@@ -101,10 +108,16 @@ import de.graetz.electronote.canvas.StickyNoteElement
 import de.graetz.electronote.canvas.TextElement
 import de.graetz.electronote.data.NotebookDocument
 import de.graetz.electronote.data.NotebookStore
+import de.graetz.electronote.electrical.CircuitSymbolPickerDialog
+import de.graetz.electronote.electrical.ElektroSimDialog
 import de.graetz.electronote.livecast.LiveCastServer
 import de.graetz.electronote.livecast.LiveCastSheet
+import de.graetz.electronote.math.MathPanelDialog
 import de.graetz.electronote.media.DocumentScanImporter
+import de.graetz.electronote.media.LocalVideoPlaybackDialog
 import de.graetz.electronote.media.PhotoImporter
+import de.graetz.electronote.media.YoutubePlaybackDialog
+import de.graetz.electronote.media.YoutubeUtil
 import de.graetz.electronote.ocr.HandwritingRecognizer
 import de.graetz.electronote.pdf.PdfExporter
 import de.graetz.electronote.pdf.PdfImporter
@@ -125,6 +138,13 @@ private val PALETTE = listOf(
 )
 
 private val STROKE_WIDTHS = listOf(2.5f, 4.5f, 7f, 11f)
+
+private data class PendingImageInsert(
+    val bitmap: Bitmap,
+    val kind: String,
+    val videoFilename: String? = null,
+    val youtubeUrl: String? = null
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -147,19 +167,110 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         controller.setBackgroundLayers(layers)
     }
 
+    suspend fun reloadImageElements(doc: NotebookDocument) {
+        val elements = withContext(Dispatchers.IO) {
+            doc.imageElements.map { img -> img to NotebookStore.loadBackgroundImage(context, doc.id, img.filename) }
+        }
+        controller.setImageElements(elements)
+    }
+
     fun syncDocumentFromCanvas() {
         val doc = document ?: return
         doc.strokes = controller.getStrokes().toMutableList()
         doc.textElements = controller.getTextElements().toMutableList()
         doc.stickyNotes = controller.getStickyNotes().toMutableList()
+        doc.imageElements = controller.getImageElements().toMutableList()
         doc.canvasHeightPx = controller.canvasHeightPx
         if (controller.canvasWidthPx > 0) doc.canvasWidthPx = controller.canvasWidthPx
+    }
+
+    // Shared insertion path for math plots, circuit symbols, and video/YouTube
+    // thumbnails: saves the bitmap under the document folder and places it as an
+    // ImageElement at (x, y), sized to fit within a reasonable on-canvas box while
+    // keeping the bitmap's aspect ratio.
+    fun insertImageElement(
+        bitmap: Bitmap,
+        x: Float,
+        y: Float,
+        kind: String,
+        videoFilename: String? = null,
+        youtubeUrl: String? = null,
+        maxWidthPx: Float = 500f
+    ) {
+        val doc = document ?: return
+        val element = ImageElement(
+            x = x,
+            y = y,
+            widthPx = 0f,
+            heightPx = 0f,
+            filename = "",
+            kind = kind,
+            videoFilename = videoFilename,
+            youtubeUrl = youtubeUrl
+        )
+        val scale = if (bitmap.width > maxWidthPx) maxWidthPx / bitmap.width else 1f
+        element.widthPx = bitmap.width * scale
+        element.heightPx = bitmap.height * scale
+        scope.launch {
+            val filename = withContext(Dispatchers.IO) {
+                NotebookStore.saveBackgroundImage(context, doc.id, element.id, bitmap)
+            }
+            element.filename = filename
+            doc.imageElements.add(element)
+            controller.addImageElement(element, bitmap)
+            saveDocument()
+        }
     }
 
     fun saveDocument() {
         val doc = document ?: return
         syncDocumentFromCanvas()
         scope.launch(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
+    }
+
+    // Cross-notebook search index: typed text/tags/bookmarks plus an OCR pass over the
+    // handwriting, run once when leaving the notebook (not on every keystroke-save) to
+    // keep this from slowing down normal editing. Very tall notebooks are only indexed
+    // up to their first ~12000px — a generous multi-page span — to bound OCR memory use.
+    suspend fun buildSearchText(doc: NotebookDocument): String {
+        val parts = mutableListOf<String>()
+        parts.add(doc.name)
+        parts.addAll(doc.tags)
+        parts.addAll(doc.textElements.map { it.text })
+        parts.addAll(doc.stickyNotes.map { it.text })
+        parts.addAll(doc.bookmarks.map { it.name })
+
+        val ocrHeight = minOf(doc.canvasHeightPx, 12000)
+        val widthPx = if (controller.canvasWidthPx > 0) controller.canvasWidthPx.toFloat() else 1600f
+        val bitmap = withContext(Dispatchers.Main) {
+            controller.captureRegion(RectF(0f, 0f, widthPx, ocrHeight.toFloat()))
+        }
+        if (bitmap != null) {
+            try {
+                val ocrText = HandwritingRecognizer.recognize(bitmap)
+                if (ocrText.isNotBlank()) parts.add(ocrText)
+            } catch (e: Exception) {
+                // No recognizable handwriting — the typed/tag text above still gets indexed.
+            } finally {
+                bitmap.recycle()
+            }
+        }
+        return parts.filter { it.isNotBlank() }.joinToString(" ")
+    }
+
+    fun saveAndIndexThenBack() {
+        val doc = document
+        if (doc == null) {
+            onBack()
+            return
+        }
+        syncDocumentFromCanvas()
+        scope.launch {
+            withContext(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
+            doc.searchText = buildSearchText(doc)
+            withContext(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
+            onBack()
+        }
     }
 
     LaunchedEffect(documentId) {
@@ -172,6 +283,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             controller.setStickyNotes(loaded.stickyNotes)
             bookmarks = loaded.bookmarks
             reloadBackgroundLayers(loaded)
+            reloadImageElements(loaded)
         }
         isLoading = false
     }
@@ -362,6 +474,46 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         Toast.makeText(context, "Bereich mit Finger/Stift umkreisen", Toast.LENGTH_SHORT).show()
     }
 
+    // Elektro: Bauteil-Bibliothek + eingebetteter Schaltungs-Simulator.
+    var showElektroChooser by remember { mutableStateOf(false) }
+    var showCircuitPicker by remember { mutableStateOf(false) }
+    var showElektroSim by remember { mutableStateOf(false) }
+
+    // Mathe-Modul: Taschenrechner + Handschrift-Formel-Erkennung + Funktionsplotter.
+    var showMathDialog by remember { mutableStateOf(false) }
+    var mathExpression by remember { mutableStateOf("") }
+
+    fun recognizeHandwritingForMath() {
+        showMathDialog = false
+        controller.startSelection(
+            onMade = { rect ->
+                val bitmap = controller.captureRegion(rect)
+                controller.stopSelection()
+                if (bitmap == null) {
+                    Toast.makeText(context, "Konnte Bereich nicht erfassen", Toast.LENGTH_SHORT).show()
+                    showMathDialog = true
+                } else {
+                    scope.launch {
+                        val text = try {
+                            withContext(Dispatchers.Default) { HandwritingRecognizer.recognize(bitmap) }
+                        } catch (e: Exception) {
+                            ""
+                        } finally {
+                            bitmap.recycle()
+                        }
+                        if (text.isNotBlank()) mathExpression = text
+                        showMathDialog = true
+                    }
+                }
+            },
+            onCancelled = {
+                Toast.makeText(context, "Auswahl zu klein — bitte großzügiger umkreisen", Toast.LENGTH_SHORT).show()
+                showMathDialog = true
+            }
+        )
+        Toast.makeText(context, "Formel mit Finger/Stift umkreisen", Toast.LENGTH_SHORT).show()
+    }
+
     // Text / sticky-note placement + editing
     var textPlacementPos by remember { mutableStateOf<Pair<Float, Float>?>(null) }
     var stickyPlacementPos by remember { mutableStateOf<Pair<Float, Float>?>(null) }
@@ -373,6 +525,87 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     controller.onWantsStickyPlacement = { x, y -> stickyPlacementPos = x to y }
     controller.onTextTapped = { t -> editingTextElement = t }
     controller.onStickyTapped = { s -> editingStickyNote = s }
+
+    var pendingImageInsert by remember { mutableStateOf<PendingImageInsert?>(null) }
+    var tappedImageElement by remember { mutableStateOf<ImageElement?>(null) }
+    var playingVideoElement by remember { mutableStateOf<ImageElement?>(null) }
+    controller.onImageTapped = { img -> tappedImageElement = img }
+    controller.onWantsImagePlacement = { x, y ->
+        pendingImageInsert?.let { pending ->
+            insertImageElement(pending.bitmap, x, y, pending.kind, pending.videoFilename, pending.youtubeUrl)
+            pendingImageInsert = null
+        }
+    }
+
+    fun beginImagePlacement(bitmap: Bitmap, kind: String, videoFilename: String? = null, youtubeUrl: String? = null) {
+        pendingImageInsert = PendingImageInsert(bitmap, kind, videoFilename, youtubeUrl)
+        controller.startImagePlacement()
+        Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+    }
+
+    // Video: Kamera-Aufnahme, Galerie-Import, YouTube-Einbettung — alle enden als
+    // ImageElement (Video-Thumbnail) an einer angetippten Stelle im Notizbuch.
+    var showVideoChooser by remember { mutableStateOf(false) }
+    var showYoutubeDialog by remember { mutableStateOf(false) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+    fun handleImportedVideo(sourceUri: Uri) {
+        val doc = document ?: return
+        scope.launch {
+            val relFilename = withContext(Dispatchers.IO) { NotebookStore.saveVideoFile(context, doc.id, sourceUri) }
+            if (relFilename == null) {
+                Toast.makeText(context, "Video konnte nicht gespeichert werden", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val thumb = withContext(Dispatchers.IO) {
+                extractVideoThumbnail(NotebookStore.videoFile(context, doc.id, relFilename))
+            }
+            if (thumb != null) {
+                beginImagePlacement(thumb, ImageElement.KIND_VIDEO, videoFilename = relFilename)
+            } else {
+                Toast.makeText(context, "Konnte Video-Vorschau nicht erzeugen", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val videoCaptureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CaptureVideo()
+    ) { success ->
+        val uri = pendingCameraUri
+        pendingCameraUri = null
+        if (success && uri != null) handleImportedVideo(uri)
+    }
+
+    fun startVideoCapture() {
+        val camDir = File(context.cacheDir, "camera").apply { mkdirs() }
+        val file = File(camDir, "${System.currentTimeMillis()}.mp4")
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        pendingCameraUri = uri
+        videoCaptureLauncher.launch(uri)
+    }
+
+    val videoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) handleImportedVideo(uri)
+    }
+
+    fun addYoutubeVideo(url: String) {
+        val id = YoutubeUtil.extractVideoId(url)
+        if (id == null) {
+            Toast.makeText(context, "Ungültiger YouTube-Link", Toast.LENGTH_SHORT).show()
+            return
+        }
+        scope.launch {
+            val bytes = withContext(Dispatchers.IO) { YoutubeUtil.fetchThumbnailBytes(id) }
+            val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+            if (bitmap != null) {
+                beginImagePlacement(bitmap, ImageElement.KIND_YOUTUBE, youtubeUrl = "https://www.youtube.com/watch?v=$id")
+            } else {
+                Toast.makeText(context, "Konnte Vorschaubild nicht laden", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     var currentTool by remember { mutableStateOf(DrawTool.PEN) }
     // Mirrors Apple Pencil's double-tap-to-switch-tool: Android has no single gesture
@@ -417,10 +650,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                 TopAppBar(
                     title = { Text(document?.name ?: "") },
                     navigationIcon = {
-                        IconButton(onClick = {
-                            saveDocument()
-                            onBack()
-                        }) {
+                        IconButton(onClick = { saveAndIndexThenBack() }) {
                             Icon(Icons.Filled.ArrowBack, contentDescription = "Zurück")
                         }
                     },
@@ -502,6 +732,13 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                                     startDocumentScan()
                                 }
                             )
+                            DropdownMenuItem(
+                                text = { Text("Video / YouTube…") },
+                                onClick = {
+                                    showInsertMenu = false
+                                    showVideoChooser = true
+                                }
+                            )
                         }
                     }
                     ActionPill(
@@ -542,6 +779,18 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         icon = Icons.Filled.TextFields,
                         color = IosColors.Indigo,
                         onClick = { startOcr() }
+                    )
+                    ActionPill(
+                        label = "Mathe",
+                        icon = Icons.Filled.Functions,
+                        color = IosColors.Purple,
+                        onClick = { showMathDialog = true }
+                    )
+                    ActionPill(
+                        label = "Elektro",
+                        icon = Icons.Filled.ElectricBolt,
+                        color = IosColors.Orange,
+                        onClick = { showElektroChooser = true }
                     )
                     ActionPill(
                         label = if (LiveCastServer.isStreaming) "LIVE" else "Übertragen",
@@ -920,6 +1169,159 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         )
     }
 
+    if (showVideoChooser) {
+        AlertDialog(
+            onDismissRequest = { showVideoChooser = false },
+            title = { Text("Video einfügen") },
+            text = { Text("Woher soll das Video kommen?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showVideoChooser = false
+                    startVideoCapture()
+                }) { Text("Kamera") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        showVideoChooser = false
+                        videoPicker.launch(
+                            androidx.activity.result.PickVisualMediaRequest(
+                                ActivityResultContracts.PickVisualMedia.VideoOnly
+                            )
+                        )
+                    }) { Text("Galerie") }
+                    TextButton(onClick = {
+                        showVideoChooser = false
+                        showYoutubeDialog = true
+                    }) { Text("YouTube") }
+                }
+            }
+        )
+    }
+
+    if (showYoutubeDialog) {
+        var input by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showYoutubeDialog = false },
+            title = { Text("YouTube-Video einfügen") },
+            text = {
+                OutlinedTextField(value = input, onValueChange = { input = it }, placeholder = { Text("YouTube-Link…") })
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showYoutubeDialog = false
+                    addYoutubeVideo(input)
+                }) { Text("Einfügen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showYoutubeDialog = false }) { Text("Abbrechen") }
+            }
+        )
+    }
+
+    playingVideoElement?.let { img ->
+        val doc = document
+        val videoFilename = img.videoFilename
+        val youtubeUrl = img.youtubeUrl
+        if (img.kind == ImageElement.KIND_VIDEO && doc != null && videoFilename != null) {
+            LocalVideoPlaybackDialog(
+                file = NotebookStore.videoFile(context, doc.id, videoFilename),
+                onDismiss = { playingVideoElement = null }
+            )
+        } else if (img.kind == ImageElement.KIND_YOUTUBE && youtubeUrl != null) {
+            val id = YoutubeUtil.extractVideoId(youtubeUrl)
+            if (id != null) {
+                YoutubePlaybackDialog(videoId = id, onDismiss = { playingVideoElement = null })
+            } else {
+                playingVideoElement = null
+            }
+        }
+    }
+
+    if (showElektroChooser) {
+        AlertDialog(
+            onDismissRequest = { showElektroChooser = false },
+            title = { Text("Elektro") },
+            text = { Text("Bauteil aus der Bibliothek einfügen, oder den Schaltungs-Simulator öffnen?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showElektroChooser = false
+                    showCircuitPicker = true
+                }) { Text("Bauteile") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showElektroChooser = false
+                    showElektroSim = true
+                }) { Text("Simulator") }
+            }
+        )
+    }
+
+    if (showCircuitPicker) {
+        CircuitSymbolPickerDialog(
+            onDismiss = { showCircuitPicker = false },
+            onPick = { bitmap ->
+                beginImagePlacement(bitmap, ImageElement.KIND_CIRCUIT_SYMBOL)
+            }
+        )
+    }
+
+    if (showElektroSim) {
+        ElektroSimDialog(
+            onDismiss = { showElektroSim = false },
+            onInsertImage = { bitmap ->
+                beginImagePlacement(bitmap, ImageElement.KIND_IMAGE)
+            }
+        )
+    }
+
+    if (showMathDialog) {
+        MathPanelDialog(
+            expression = mathExpression,
+            onExpressionChange = { mathExpression = it },
+            onDismiss = { showMathDialog = false },
+            onRecognizeHandwriting = { recognizeHandwritingForMath() },
+            onInsertPlot = { bitmap -> beginImagePlacement(bitmap, ImageElement.KIND_MATH_PLOT) }
+        )
+    }
+
+    tappedImageElement?.let { img ->
+        AlertDialog(
+            onDismissRequest = { tappedImageElement = null },
+            title = {
+                Text(
+                    when (img.kind) {
+                        ImageElement.KIND_VIDEO -> "Video"
+                        ImageElement.KIND_YOUTUBE -> "YouTube-Video"
+                        ImageElement.KIND_CIRCUIT_SYMBOL -> "Schaltzeichen"
+                        ImageElement.KIND_MATH_PLOT -> "Funktionsgraph"
+                        else -> "Bild"
+                    }
+                )
+            },
+            text = { Text("Was möchtest du tun?") },
+            confirmButton = {
+                if (img.kind == ImageElement.KIND_VIDEO || img.kind == ImageElement.KIND_YOUTUBE) {
+                    TextButton(onClick = {
+                        playingVideoElement = img
+                        tappedImageElement = null
+                    }) { Text("Abspielen") }
+                } else {
+                    TextButton(onClick = { tappedImageElement = null }) { Text("Schließen") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    document?.imageElements?.removeAll { it.id == img.id }
+                    controller.removeImageElement(img.id)
+                    saveDocument()
+                    tappedImageElement = null
+                }) { Text("Löschen") }
+            }
+        )
+    }
+
     if (showSavePresetDialog) {
         AlertDialog(
             onDismissRequest = { showSavePresetDialog = false; newPresetName = "" },
@@ -993,6 +1395,20 @@ private fun SidebarButton(
             fontSize = 10.sp,
             maxLines = 1
         )
+    }
+}
+
+// MediaMetadataRetriever only implements Closeable since API 29; minSdk here is 26, so
+// release() is called explicitly instead of relying on `use {}`.
+private fun extractVideoThumbnail(file: File): Bitmap? {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(file.absolutePath)
+        retriever.getFrameAtTime(0)
+    } catch (e: Exception) {
+        null
+    } finally {
+        retriever.release()
     }
 }
 

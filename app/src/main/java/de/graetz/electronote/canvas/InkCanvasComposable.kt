@@ -41,6 +41,8 @@ class InkCanvasController {
     // Fires when the View switches tool on its own (stylus barrel button), so the
     // Compose-side tool selection UI can stay in sync.
     var onToolChangeRequested: ((DrawTool) -> Unit)? = null
+    var onWantsImagePlacement: ((Float, Float) -> Unit)? = null
+    var onImageTapped: ((ImageElement) -> Unit)? = null
 
     internal fun bind(view: InkCanvasView) {
         this.view = view
@@ -54,6 +56,8 @@ class InkCanvasController {
         view.onSelectionMade = { rect -> onSelectionMadeCallback?.invoke(rect) }
         view.onSelectionCancelled = { onSelectionCancelledCallback?.invoke() }
         view.onToolChangeRequested = { tool -> onToolChangeRequested?.invoke(tool) }
+        view.onImagePlacementRequested = { x, y -> onWantsImagePlacement?.invoke(x, y) }
+        view.onImageElementTapped = { img -> onImageTapped?.invoke(img) }
     }
 
     fun undo() = view?.undo()
@@ -91,8 +95,16 @@ class InkCanvasController {
         view?.setBackgroundLayers(layers)
     }
 
+    fun getImageElements(): List<ImageElement> = view?.getImageElements() ?: emptyList()
+    fun setImageElements(elements: List<Pair<ImageElement, Bitmap?>>) {
+        view?.setImageElements(elements)
+    }
+    fun addImageElement(element: ImageElement, bitmap: Bitmap?) = view?.addImageElement(element, bitmap)
+    fun removeImageElement(id: String) = view?.removeImageElement(id)
+
     fun startTextPlacement() { view?.placementMode = PlacementMode.TEXT }
     fun startStickyPlacement() { view?.placementMode = PlacementMode.STICKY }
+    fun startImagePlacement() { view?.placementMode = PlacementMode.IMAGE }
 
     fun startSelection(onMade: (RectF) -> Unit, onCancelled: () -> Unit) {
         onSelectionMadeCallback = onMade
