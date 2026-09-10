@@ -184,44 +184,6 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         if (controller.canvasWidthPx > 0) doc.canvasWidthPx = controller.canvasWidthPx
     }
 
-    // Shared insertion path for math plots, circuit symbols, and video/YouTube
-    // thumbnails: saves the bitmap under the document folder and places it as an
-    // ImageElement at (x, y), sized to fit within a reasonable on-canvas box while
-    // keeping the bitmap's aspect ratio.
-    fun insertImageElement(
-        bitmap: Bitmap,
-        x: Float,
-        y: Float,
-        kind: String,
-        videoFilename: String? = null,
-        youtubeUrl: String? = null,
-        maxWidthPx: Float = 500f
-    ) {
-        val doc = document ?: return
-        val element = ImageElement(
-            x = x,
-            y = y,
-            widthPx = 0f,
-            heightPx = 0f,
-            filename = "",
-            kind = kind,
-            videoFilename = videoFilename,
-            youtubeUrl = youtubeUrl
-        )
-        val scale = if (bitmap.width > maxWidthPx) maxWidthPx / bitmap.width else 1f
-        element.widthPx = bitmap.width * scale
-        element.heightPx = bitmap.height * scale
-        scope.launch {
-            val filename = withContext(Dispatchers.IO) {
-                NotebookStore.saveBackgroundImage(context, doc.id, element.id, bitmap)
-            }
-            element.filename = filename
-            doc.imageElements.add(element)
-            controller.addImageElement(element, bitmap)
-            saveDocument()
-        }
-    }
-
     fun saveDocument() {
         val doc = document ?: return
         syncDocumentFromCanvas()
@@ -270,6 +232,44 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             doc.searchText = buildSearchText(doc)
             withContext(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
             onBack()
+        }
+    }
+
+    // Shared insertion path for math plots, circuit symbols, and video/YouTube
+    // thumbnails: saves the bitmap under the document folder and places it as an
+    // ImageElement at (x, y), sized to fit within a reasonable on-canvas box while
+    // keeping the bitmap's aspect ratio.
+    fun insertImageElement(
+        bitmap: Bitmap,
+        x: Float,
+        y: Float,
+        kind: String,
+        videoFilename: String? = null,
+        youtubeUrl: String? = null,
+        maxWidthPx: Float = 500f
+    ) {
+        val doc = document ?: return
+        val element = ImageElement(
+            x = x,
+            y = y,
+            widthPx = 0f,
+            heightPx = 0f,
+            filename = "",
+            kind = kind,
+            videoFilename = videoFilename,
+            youtubeUrl = youtubeUrl
+        )
+        val scale = if (bitmap.width > maxWidthPx) maxWidthPx / bitmap.width else 1f
+        element.widthPx = bitmap.width * scale
+        element.heightPx = bitmap.height * scale
+        scope.launch {
+            val filename = withContext(Dispatchers.IO) {
+                NotebookStore.saveBackgroundImage(context, doc.id, element.id, bitmap)
+            }
+            element.filename = filename
+            doc.imageElements.add(element)
+            controller.addImageElement(element, bitmap)
+            saveDocument()
         }
     }
 
