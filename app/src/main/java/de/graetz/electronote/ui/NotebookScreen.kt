@@ -13,46 +13,46 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Backspace
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ElectricBolt
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Functions
-import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.LineWeight
 import androidx.compose.material.icons.filled.ModeEditOutline
-import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.TextFields
@@ -66,12 +66,14 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -88,6 +90,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.content.FileProvider
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanner
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -129,12 +132,16 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
+// Matches the iPad app's row-2 color set (white included for writing on dark paper).
 private val PALETTE = listOf(
     AndroidColor.BLACK,
+    AndroidColor.WHITE,
     AndroidColor.parseColor("#1E88E5"),
     AndroidColor.parseColor("#E53935"),
     AndroidColor.parseColor("#2E7D32"),
+    AndroidColor.parseColor("#FFC107"),
     AndroidColor.parseColor("#F57C00"),
+    AndroidColor.parseColor("#8E24AA"),
 )
 
 private val STROKE_WIDTHS = listOf(2.5f, 4.5f, 7f, 11f)
@@ -474,8 +481,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         Toast.makeText(context, "Bereich mit Finger/Stift umkreisen", Toast.LENGTH_SHORT).show()
     }
 
-    // Elektro: Bauteil-Bibliothek + eingebetteter Schaltungs-Simulator.
-    var showElektroChooser by remember { mutableStateOf(false) }
+    // Elektro: Bauteil-Bibliothek (Schaltplan-Pill) + eingebetteter Schaltungs-Simulator ("..."-Menü).
     var showCircuitPicker by remember { mutableStateOf(false) }
     var showElektroSim by remember { mutableStateOf(false) }
 
@@ -545,7 +551,6 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
 
     // Video: Kamera-Aufnahme, Galerie-Import, YouTube-Einbettung — alle enden als
     // ImageElement (Video-Thumbnail) an einer angetippten Stelle im Notizbuch.
-    var showVideoChooser by remember { mutableStateOf(false) }
     var showYoutubeDialog by remember { mutableStateOf(false) }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -607,6 +612,47 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         }
     }
 
+    // Kamera: photographs get appended as a full-width page background, same as a
+    // gallery-picked photo (PhotoImporter) — only the source Uri differs.
+    var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    val photoCaptureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = pendingPhotoUri
+        pendingPhotoUri = null
+        val doc = document
+        if (success && uri != null && doc != null) {
+            scope.launch {
+                syncDocumentFromCanvas()
+                val bg = withContext(Dispatchers.IO) { PhotoImporter.importPhoto(context, uri, doc) }
+                if (bg != null) {
+                    doc.backgrounds.add(bg)
+                    doc.canvasHeightPx = maxOf(doc.canvasHeightPx, bg.yOffsetPx + bg.heightPx + 200)
+                    controller.canvasHeightPx = doc.canvasHeightPx
+                    withContext(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
+                    reloadBackgroundLayers(doc)
+                }
+            }
+        }
+    }
+
+    fun startPhotoCapture() {
+        val camDir = File(context.cacheDir, "camera").apply { mkdirs() }
+        val file = File(camDir, "${System.currentTimeMillis()}.jpg")
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        pendingPhotoUri = uri
+        photoCaptureLauncher.launch(uri)
+    }
+
+    // WebView: opens an arbitrary URL via Chrome Custom Tabs — same Google-login-safe
+    // mechanism already used for the AI providers, just for any address the user types.
+    var showWebViewDialog by remember { mutableStateOf(false) }
+    fun openWebViewUrl(url: String) {
+        val normalized = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+        val intent = CustomTabsIntent.Builder().build()
+        intent.launchUrl(context, Uri.parse(normalized))
+    }
+
     var currentTool by remember { mutableStateOf(DrawTool.PEN) }
     // Mirrors Apple Pencil's double-tap-to-switch-tool: Android has no single gesture
     // that works across all stylus vendors, so the stylus barrel button is used instead.
@@ -616,12 +662,11 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     var paperStyle by remember { mutableStateOf(PaperStyle.LINED) }
     var selectedLineSpacing by remember { mutableStateOf(LineSpacing.MEDIUM) }
     var showAiMenu by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
     var showInsertMenu by remember { mutableStateOf(false) }
-    var showPaperMenu by remember { mutableStateOf(false) }
-    var showColorMenu by remember { mutableStateOf(false) }
-    var showWidthMenu by remember { mutableStateOf(false) }
+    var showPaperDialog by remember { mutableStateOf(false) }
     var showLiveCastSheet by remember { mutableStateOf(false) }
-    var showPresetMenu by remember { mutableStateOf(false) }
+    var showPresetDialog by remember { mutableStateOf(false) }
     var showSavePresetDialog by remember { mutableStateOf(false) }
     var newPresetName by remember { mutableStateOf("") }
     var presets by remember { mutableStateOf<List<InkPreset>>(InkPresetStore.load(context)) }
@@ -670,6 +715,13 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         IconButton(onClick = { saveDocument() }) {
                             Icon(Icons.Filled.Save, contentDescription = "Speichern")
                         }
+                        IconButton(onClick = { showLiveCastSheet = true }) {
+                            Icon(
+                                Icons.Filled.Wifi,
+                                contentDescription = "Live-Übertragung",
+                                tint = if (LiveCastServer.isStreaming) IosColors.Red else LocalContentColor.current
+                            )
+                        }
                         Box {
                             IconButton(onClick = { showAiMenu = true }) {
                                 Icon(Icons.Filled.SmartToy, contentDescription = "KI-Assistent")
@@ -686,11 +738,182 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                                 }
                             }
                         }
+                        Box {
+                            ActionPill(
+                                label = "Einfügen",
+                                icon = Icons.Filled.Add,
+                                color = IosColors.Blue,
+                                onClick = { showInsertMenu = true }
+                            )
+                            DropdownMenu(expanded = showInsertMenu, onDismissRequest = { showInsertMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Text einfügen") },
+                                    onClick = {
+                                        showInsertMenu = false
+                                        controller.startTextPlacement()
+                                        Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Haftzettel einfügen") },
+                                    onClick = {
+                                        showInsertMenu = false
+                                        controller.startStickyPlacement()
+                                        Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Foto importieren") },
+                                    onClick = {
+                                        showInsertMenu = false
+                                        photoPicker.launch(
+                                            androidx.activity.result.PickVisualMediaRequest(
+                                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                                            )
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                        Box {
+                            IconButton(onClick = { showMoreMenu = true }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "Mehr")
+                            }
+                            DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Video aus Galerie") },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        videoPicker.launch(
+                                            androidx.activity.result.PickVisualMediaRequest(
+                                                ActivityResultContracts.PickVisualMedia.VideoOnly
+                                            )
+                                        )
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Video mit Kamera aufnehmen") },
+                                    onClick = { showMoreMenu = false; startVideoCapture() }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Handschrift erkennen") },
+                                    onClick = { showMoreMenu = false; startOcr() }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Elektro-Simulator öffnen") },
+                                    onClick = { showMoreMenu = false; showElektroSim = true }
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Exportieren…") },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        val name = (document?.name ?: "Notizbuch") + ".pdf"
+                                        pdfExportLauncher.launch(name)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Teilen…") },
+                                    onClick = { showMoreMenu = false; shareAsPdf() }
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Papierstil & Zeilenabstand") },
+                                    onClick = { showMoreMenu = false; showPaperDialog = true }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Stift-Presets") },
+                                    onClick = { showMoreMenu = false; showPresetDialog = true }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Lesezeichen") },
+                                    onClick = { showMoreMenu = false; showBookmarksMenu = true }
+                                )
+                            }
+                        }
                     }
                 )
 
-                // Action pills — Einfügen/Exportieren/Text/Haftzettel/
-                // Text erkennen/Live-Übertragung.
+                // Row 2: Werkzeuge (Stift/Marker/Bleistift/Radierer), Farben, Strichstärke —
+                // matches the iPad app's horizontal tool row (no left sidebar).
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ToolToggle(Icons.Filled.Edit, "Stift", currentTool == DrawTool.PEN) {
+                        currentTool = DrawTool.PEN; controller.setTool(DrawTool.PEN)
+                    }
+                    ToolToggle(Icons.Filled.Brush, "Marker", currentTool == DrawTool.MARKER) {
+                        currentTool = DrawTool.MARKER; controller.setTool(DrawTool.MARKER)
+                    }
+                    ToolToggle(Icons.Filled.ModeEditOutline, "Bleistift", currentTool == DrawTool.PENCIL) {
+                        currentTool = DrawTool.PENCIL; controller.setTool(DrawTool.PENCIL)
+                    }
+                    ToolToggle(Icons.Filled.Backspace, "Radierer", currentTool == DrawTool.ERASER) {
+                        currentTool = DrawTool.ERASER; controller.setTool(DrawTool.ERASER)
+                    }
+
+                    VerticalDivider(modifier = Modifier.padding(horizontal = 6.dp).height(28.dp))
+
+                    for (c in PALETTE) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .padding(3.dp)
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(Color(c))
+                                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                                .clickable {
+                                    selectedColorArgb = c
+                                    controller.setColor(c)
+                                }
+                        ) {
+                            if (selectedColorArgb == c) {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = if (c == AndroidColor.WHITE) Color.Black else Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    VerticalDivider(modifier = Modifier.padding(horizontal = 6.dp).height(28.dp))
+
+                    for (w in STROKE_WIDTHS) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .padding(3.dp)
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (selectedWidthPx == w) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                    else Color.Transparent
+                                )
+                                .clickable {
+                                    selectedWidthPx = w
+                                    controller.setWidthPx(w)
+                                }
+                        ) {
+                            Box(
+                                Modifier
+                                    .size((w / 1.2f).dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.onSurface)
+                            )
+                        }
+                    }
+                }
+
+                // Row 3: colorful pills, matching the iPad app's set exactly —
+                // Formen, Mathe, Schaltplan, Dateien, Nextcloud, Kamera, Scannen, YouTube, WebView.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -699,86 +922,14 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box {
-                        ActionPill(
-                            label = "Einfügen",
-                            icon = Icons.Filled.Add,
-                            color = IosColors.Teal,
-                            onClick = { showInsertMenu = true }
-                        )
-                        DropdownMenu(expanded = showInsertMenu, onDismissRequest = { showInsertMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("PDF importieren") },
-                                onClick = {
-                                    showInsertMenu = false
-                                    pdfPicker.launch(arrayOf("application/pdf"))
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Foto importieren") },
-                                onClick = {
-                                    showInsertMenu = false
-                                    photoPicker.launch(
-                                        androidx.activity.result.PickVisualMediaRequest(
-                                            ActivityResultContracts.PickVisualMedia.ImageOnly
-                                        )
-                                    )
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Dokument scannen") },
-                                onClick = {
-                                    showInsertMenu = false
-                                    startDocumentScan()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Video / YouTube…") },
-                                onClick = {
-                                    showInsertMenu = false
-                                    showVideoChooser = true
-                                }
-                            )
-                        }
-                    }
                     ActionPill(
-                        label = "Text",
-                        icon = Icons.Filled.Title,
-                        color = IosColors.Orange,
+                        label = "Formen",
+                        icon = Icons.Filled.AutoFixHigh,
+                        color = if (shapeSnapEnabled) IosColors.Green else Color(0xFF6E6E73),
                         onClick = {
-                            controller.startTextPlacement()
-                            Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+                            shapeSnapEnabled = !shapeSnapEnabled
+                            controller.setShapeSnapEnabled(shapeSnapEnabled)
                         }
-                    )
-                    ActionPill(
-                        label = "Haftzettel",
-                        icon = Icons.Filled.StickyNote2,
-                        color = IosColors.Yellow,
-                        onClick = {
-                            controller.startStickyPlacement()
-                            Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
-                        }
-                    )
-                    ActionPill(
-                        label = "Exportieren",
-                        icon = Icons.Filled.IosShare,
-                        color = IosColors.Blue,
-                        onClick = {
-                            val name = (document?.name ?: "Notizbuch") + ".pdf"
-                            pdfExportLauncher.launch(name)
-                        }
-                    )
-                    ActionPill(
-                        label = "Teilen",
-                        icon = Icons.Filled.Share,
-                        color = IosColors.Mint,
-                        onClick = { shareAsPdf() }
-                    )
-                    ActionPill(
-                        label = "Text erkennen",
-                        icon = Icons.Filled.TextFields,
-                        color = IosColors.Indigo,
-                        onClick = { startOcr() }
                     )
                     ActionPill(
                         label = "Mathe",
@@ -787,16 +938,16 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         onClick = { showMathDialog = true }
                     )
                     ActionPill(
-                        label = "Elektro",
+                        label = "Schaltplan",
                         icon = Icons.Filled.ElectricBolt,
-                        color = IosColors.Orange,
-                        onClick = { showElektroChooser = true }
+                        color = IosColors.Yellow,
+                        onClick = { showCircuitPicker = true }
                     )
                     ActionPill(
-                        label = if (LiveCastServer.isStreaming) "LIVE" else "Übertragen",
-                        icon = Icons.Filled.Wifi,
-                        color = if (LiveCastServer.isStreaming) IosColors.Red else IosColors.Pink,
-                        onClick = { showLiveCastSheet = true }
+                        label = "Dateien",
+                        icon = Icons.Filled.Folder,
+                        color = IosColors.Teal,
+                        onClick = { pdfPicker.launch(arrayOf("application/pdf")) }
                     )
                     ActionPill(
                         label = "Nextcloud",
@@ -804,229 +955,42 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         color = IosColors.Cyan,
                         onClick = { uploadToNextcloud() }
                     )
+                    ActionPill(
+                        label = "Kamera",
+                        icon = Icons.Filled.PhotoCamera,
+                        color = IosColors.Red,
+                        onClick = { startPhotoCapture() }
+                    )
+                    ActionPill(
+                        label = "Scannen",
+                        icon = Icons.Filled.DocumentScanner,
+                        color = IosColors.Indigo,
+                        onClick = { startDocumentScan() }
+                    )
+                    ActionPill(
+                        label = "YouTube",
+                        icon = Icons.Filled.SmartDisplay,
+                        color = IosColors.Red,
+                        onClick = { showYoutubeDialog = true }
+                    )
+                    ActionPill(
+                        label = "WebView",
+                        icon = Icons.Filled.Public,
+                        color = IosColors.Mint,
+                        onClick = { showWebViewDialog = true }
+                    )
                 }
             }
         }
     ) { padding ->
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(scrollState)
         ) {
             if (!isLoading && document != null) {
-                Column(
-                    modifier = Modifier
-                        .width(76.dp)
-                        .fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        .verticalScroll(rememberScrollState())
-                        .padding(vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    SidebarButton(Icons.Filled.Edit, "Stift", currentTool == DrawTool.PEN) {
-                        currentTool = DrawTool.PEN; controller.setTool(DrawTool.PEN)
-                    }
-                    SidebarButton(Icons.Filled.Brush, "Marker", currentTool == DrawTool.MARKER) {
-                        currentTool = DrawTool.MARKER; controller.setTool(DrawTool.MARKER)
-                    }
-                    SidebarButton(Icons.Filled.ModeEditOutline, "Bleistift", currentTool == DrawTool.PENCIL) {
-                        currentTool = DrawTool.PENCIL; controller.setTool(DrawTool.PENCIL)
-                    }
-                    SidebarButton(Icons.Filled.Backspace, "Radierer", currentTool == DrawTool.ERASER) {
-                        currentTool = DrawTool.ERASER; controller.setTool(DrawTool.ERASER)
-                    }
-
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp, horizontal = 14.dp))
-
-                    Box {
-                        SidebarButton(Icons.Filled.Palette, "Farbe", false, tint = Color(selectedColorArgb)) {
-                            showColorMenu = true
-                        }
-                        DropdownMenu(expanded = showColorMenu, onDismissRequest = { showColorMenu = false }) {
-                            for (c in PALETTE) {
-                                DropdownMenuItem(
-                                    text = {
-                                        Box(Modifier.size(20.dp).clip(CircleShape).background(Color(c)))
-                                    },
-                                    trailingIcon = {
-                                        if (selectedColorArgb == c) Icon(Icons.Filled.Check, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        showColorMenu = false
-                                        selectedColorArgb = c
-                                        controller.setColor(c)
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    Box {
-                        SidebarButton(Icons.Filled.LineWeight, "Stärke", false) {
-                            showWidthMenu = true
-                        }
-                        DropdownMenu(expanded = showWidthMenu, onDismissRequest = { showWidthMenu = false }) {
-                            for (w in STROKE_WIDTHS) {
-                                DropdownMenuItem(
-                                    text = { Text("${w}pt") },
-                                    leadingIcon = {
-                                        Box(
-                                            Modifier
-                                                .size((w / 1.2f).dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.onSurface)
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        if (selectedWidthPx == w) Icon(Icons.Filled.Check, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        showWidthMenu = false
-                                        selectedWidthPx = w
-                                        controller.setWidthPx(w)
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp, horizontal = 14.dp))
-
-                    SidebarButton(Icons.Filled.AutoFixHigh, "Formen", shapeSnapEnabled) {
-                        shapeSnapEnabled = !shapeSnapEnabled
-                        controller.setShapeSnapEnabled(shapeSnapEnabled)
-                    }
-
-                    Box {
-                        SidebarButton(Icons.Filled.GridOn, "Papier", false) { showPaperMenu = true }
-                        DropdownMenu(expanded = showPaperMenu, onDismissRequest = { showPaperMenu = false }) {
-                            for (style in PaperStyle.entries) {
-                                DropdownMenuItem(
-                                    text = { Text(style.label()) },
-                                    trailingIcon = {
-                                        if (paperStyle == style) Icon(Icons.Filled.Check, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        showPaperMenu = false
-                                        paperStyle = style
-                                        controller.setPaperStyle(style)
-                                        document?.paperStyle = style
-                                    }
-                                )
-                            }
-                            HorizontalDivider()
-                            Text(
-                                "Zeilenabstand",
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                            )
-                            for (spacing in LineSpacing.entries) {
-                                DropdownMenuItem(
-                                    text = { Text(spacing.label) },
-                                    trailingIcon = {
-                                        if (selectedLineSpacing == spacing) Icon(Icons.Filled.Check, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        showPaperMenu = false
-                                        selectedLineSpacing = spacing
-                                        controller.setLineSpacing(spacing.px)
-                                        document?.lineSpacing = spacing
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    Box {
-                        SidebarButton(Icons.Filled.Bookmarks, "Presets", false) { showPresetMenu = true }
-                        DropdownMenu(expanded = showPresetMenu, onDismissRequest = { showPresetMenu = false }) {
-                            for (preset in presets) {
-                                DropdownMenuItem(
-                                    text = { Text(preset.name) },
-                                    leadingIcon = {
-                                        Box(
-                                            Modifier
-                                                .size(18.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(preset.colorArgb))
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        IconButton(onClick = {
-                                            val updated = presets.filterNot { it.id == preset.id }
-                                            presets = updated
-                                            InkPresetStore.save(context, updated)
-                                        }) {
-                                            Icon(Icons.Filled.Delete, contentDescription = "Löschen")
-                                        }
-                                    },
-                                    onClick = {
-                                        showPresetMenu = false
-                                        applyPreset(preset)
-                                    }
-                                )
-                            }
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("Aktuellen Stift speichern…") },
-                                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                                onClick = {
-                                    showPresetMenu = false
-                                    showSavePresetDialog = true
-                                }
-                            )
-                        }
-                    }
-
-                    Box {
-                        SidebarButton(Icons.Filled.Bookmark, "Marken", false) { showBookmarksMenu = true }
-                        DropdownMenu(expanded = showBookmarksMenu, onDismissRequest = { showBookmarksMenu = false }) {
-                            if (bookmarks.isEmpty()) {
-                                DropdownMenuItem(text = { Text("Keine Lesezeichen") }, onClick = {}, enabled = false)
-                            }
-                            for (bm in bookmarks) {
-                                DropdownMenuItem(
-                                    text = { Text(bm.name) },
-                                    trailingIcon = {
-                                        IconButton(onClick = {
-                                            val updated = bookmarks.filterNot { it.id == bm.id }
-                                            bookmarks = updated
-                                            document?.bookmarks = updated.toMutableList()
-                                            saveDocument()
-                                        }) {
-                                            Icon(Icons.Filled.Delete, contentDescription = "Löschen")
-                                        }
-                                    },
-                                    onClick = {
-                                        showBookmarksMenu = false
-                                        scope.launch { scrollState.animateScrollTo(bm.yOffsetPx) }
-                                    }
-                                )
-                            }
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("Hier Lesezeichen setzen…") },
-                                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                                onClick = {
-                                    showBookmarksMenu = false
-                                    showAddBookmarkDialog = true
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .verticalScroll(scrollState)
-            ) {
-                if (!isLoading && document != null) {
-                    InkCanvas(controller = controller, modifier = Modifier.fillMaxWidth())
-                }
+                InkCanvas(controller = controller, modifier = Modifier.fillMaxWidth())
             }
         }
     }
@@ -1169,36 +1133,6 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         )
     }
 
-    if (showVideoChooser) {
-        AlertDialog(
-            onDismissRequest = { showVideoChooser = false },
-            title = { Text("Video einfügen") },
-            text = { Text("Woher soll das Video kommen?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showVideoChooser = false
-                    startVideoCapture()
-                }) { Text("Kamera") }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = {
-                        showVideoChooser = false
-                        videoPicker.launch(
-                            androidx.activity.result.PickVisualMediaRequest(
-                                ActivityResultContracts.PickVisualMedia.VideoOnly
-                            )
-                        )
-                    }) { Text("Galerie") }
-                    TextButton(onClick = {
-                        showVideoChooser = false
-                        showYoutubeDialog = true
-                    }) { Text("YouTube") }
-                }
-            }
-        )
-    }
-
     if (showYoutubeDialog) {
         var input by remember { mutableStateOf("") }
         AlertDialog(
@@ -1236,26 +1170,6 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                 playingVideoElement = null
             }
         }
-    }
-
-    if (showElektroChooser) {
-        AlertDialog(
-            onDismissRequest = { showElektroChooser = false },
-            title = { Text("Elektro") },
-            text = { Text("Bauteil aus der Bibliothek einfügen, oder den Schaltungs-Simulator öffnen?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showElektroChooser = false
-                    showCircuitPicker = true
-                }) { Text("Bauteile") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showElektroChooser = false
-                    showElektroSim = true
-                }) { Text("Simulator") }
-            }
-        )
     }
 
     if (showCircuitPicker) {
@@ -1322,6 +1236,165 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         )
     }
 
+    if (showPaperDialog) {
+        AlertDialog(
+            onDismissRequest = { showPaperDialog = false },
+            title = { Text("Papierstil & Zeilenabstand") },
+            text = {
+                Column {
+                    for (style in PaperStyle.entries) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    paperStyle = style
+                                    controller.setPaperStyle(style)
+                                    document?.paperStyle = style
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(style.label())
+                            if (paperStyle == style) Icon(Icons.Filled.Check, contentDescription = null)
+                        }
+                    }
+                    HorizontalDivider()
+                    Text(
+                        "Zeilenabstand",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    for (spacing in LineSpacing.entries) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedLineSpacing = spacing
+                                    controller.setLineSpacing(spacing.px)
+                                    document?.lineSpacing = spacing
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(spacing.label)
+                            if (selectedLineSpacing == spacing) Icon(Icons.Filled.Check, contentDescription = null)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPaperDialog = false }) { Text("Fertig") }
+            }
+        )
+    }
+
+    if (showPresetDialog) {
+        AlertDialog(
+            onDismissRequest = { showPresetDialog = false },
+            title = { Text("Stift-Presets") },
+            text = {
+                Column {
+                    for (preset in presets) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    applyPreset(preset)
+                                    showPresetDialog = false
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(Modifier.size(18.dp).clip(CircleShape).background(Color(preset.colorArgb)))
+                            Text(preset.name, modifier = Modifier.padding(start = 8.dp).weight(1f))
+                            IconButton(onClick = {
+                                val updated = presets.filterNot { it.id == preset.id }
+                                presets = updated
+                                InkPresetStore.save(context, updated)
+                            }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Löschen")
+                            }
+                        }
+                    }
+                    HorizontalDivider()
+                    TextButton(onClick = {
+                        showPresetDialog = false
+                        showSavePresetDialog = true
+                    }) { Text("Aktuellen Stift speichern…") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPresetDialog = false }) { Text("Fertig") }
+            }
+        )
+    }
+
+    if (showBookmarksMenu) {
+        AlertDialog(
+            onDismissRequest = { showBookmarksMenu = false },
+            title = { Text("Lesezeichen") },
+            text = {
+                Column {
+                    if (bookmarks.isEmpty()) {
+                        Text("Keine Lesezeichen")
+                    }
+                    for (bm in bookmarks) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showBookmarksMenu = false
+                                    scope.launch { scrollState.animateScrollTo(bm.yOffsetPx) }
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(bm.name, modifier = Modifier.weight(1f))
+                            IconButton(onClick = {
+                                val updated = bookmarks.filterNot { it.id == bm.id }
+                                bookmarks = updated
+                                document?.bookmarks = updated.toMutableList()
+                                saveDocument()
+                            }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Löschen")
+                            }
+                        }
+                    }
+                    HorizontalDivider()
+                    TextButton(onClick = {
+                        showBookmarksMenu = false
+                        showAddBookmarkDialog = true
+                    }) { Text("Hier Lesezeichen setzen…") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showBookmarksMenu = false }) { Text("Schließen") }
+            }
+        )
+    }
+
+    if (showWebViewDialog) {
+        var input by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showWebViewDialog = false },
+            title = { Text("Webseite öffnen") },
+            text = {
+                OutlinedTextField(value = input, onValueChange = { input = it }, placeholder = { Text("URL…") })
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showWebViewDialog = false
+                    if (input.isNotBlank()) openWebViewUrl(input)
+                }) { Text("Öffnen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWebViewDialog = false }) { Text("Abbrechen") }
+            }
+        )
+    }
+
     if (showSavePresetDialog) {
         AlertDialog(
             onDismissRequest = { showSavePresetDialog = false; newPresetName = "" },
@@ -1357,43 +1430,23 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     }
 }
 
-// A single icon+caption entry in the left tool sidebar — the vertical, tablet-native
-// counterpart to the iPad app's horizontal tool row.
+// A single tool-icon toggle in the horizontal tool row, matching the iPad app's row of
+// pen/marker/pencil/eraser icons.
 @Composable
-private fun SidebarButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    active: Boolean,
-    tint: Color? = null,
-    onClick: () -> Unit
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
+private fun ToolToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
         modifier = Modifier
-            .padding(vertical = 3.dp)
-            .width(72.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .padding(2.dp)
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(vertical = 6.dp)
     ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent)
-        ) {
-            Icon(
-                icon,
-                contentDescription = label,
-                tint = tint ?: if (active) Color.White else MaterialTheme.colorScheme.onSurface
-            )
-        }
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = 10.sp,
-            maxLines = 1
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = if (active) Color.White else MaterialTheme.colorScheme.onSurface
         )
     }
 }
