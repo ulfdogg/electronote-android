@@ -13,18 +13,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.CloudQueue
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Label
-import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.CloudQueue
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Label
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -87,25 +87,25 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
                         refreshKey++
                         onOpenDocument(doc.id)
                     }) {
-                        Icon(Icons.Filled.Add, contentDescription = "Neues Notizbuch")
+                        Icon(Icons.Outlined.Add, contentDescription = "Neues Notizbuch")
                     }
                 },
                 actions = {
                     IconButton(onClick = onOpenSearch) {
-                        Icon(Icons.Filled.Search, contentDescription = "Suchen")
+                        Icon(Icons.Outlined.Search, contentDescription = "Suchen")
                     }
                     IconButton(onClick = onOpenTrash) {
-                        Icon(Icons.Filled.DeleteSweep, contentDescription = "Papierkorb")
+                        Icon(Icons.Outlined.DeleteSweep, contentDescription = "Papierkorb")
                     }
                     IconButton(onClick = { showNextcloudDownload = true }) {
-                        Icon(Icons.Filled.CloudDownload, contentDescription = "Von Nextcloud laden")
+                        Icon(Icons.Outlined.CloudDownload, contentDescription = "Von Nextcloud laden")
                     }
                     IconButton(onClick = { showNextcloudLogin = true }) {
-                        Icon(Icons.Filled.CloudQueue, contentDescription = "Nextcloud")
+                        Icon(Icons.Outlined.CloudQueue, contentDescription = "Nextcloud")
                     }
                     IconButton(onClick = { AppPreferences.toggleDarkMode(context) }) {
                         Icon(
-                            if (AppPreferences.isDarkMode) Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                            if (AppPreferences.isDarkMode) Icons.Outlined.DarkMode else Icons.Outlined.LightMode,
                             contentDescription = "Dunkelmodus umschalten"
                         )
                     }
@@ -169,7 +169,7 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
                                         modifier = Modifier.weight(1f)
                                     ) {
                                         Icon(
-                                            Icons.Filled.Description,
+                                            Icons.Outlined.Description,
                                             contentDescription = null,
                                             tint = IosColors.Orange
                                         )
@@ -187,19 +187,19 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
                                         refreshKey++
                                     }) {
                                         Icon(
-                                            if (doc.isFavorite) Icons.Filled.Star else Icons.Filled.StarBorder,
+                                            if (doc.isFavorite) Icons.Outlined.Star else Icons.Outlined.StarBorder,
                                             contentDescription = "Favorit",
                                             tint = if (doc.isFavorite) IosColors.Yellow else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                     IconButton(onClick = { editingTagsFor = doc }) {
-                                        Icon(Icons.Filled.Label, contentDescription = "Tags bearbeiten")
+                                        Icon(Icons.Outlined.Label, contentDescription = "Tags bearbeiten")
                                     }
                                     IconButton(onClick = {
                                         NotebookStore.moveToTrash(context, doc.id)
                                         refreshKey++
                                     }) {
-                                        Icon(Icons.Filled.Delete, contentDescription = "In den Papierkorb")
+                                        Icon(Icons.Outlined.Delete, contentDescription = "In den Papierkorb")
                                     }
                                 }
                                 if (doc.tags.isNotEmpty()) {

@@ -20,45 +20,52 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.AutoFixHigh
-import androidx.compose.material.icons.filled.Backspace
-import androidx.compose.material.icons.filled.Brush
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DocumentScanner
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ElectricBolt
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Functions
-import androidx.compose.material.icons.filled.IosShare
-import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.ModeEditOutline
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Redo
-import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.SmartDisplay
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.StickyNote2
-import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material.icons.filled.Title
-import androidx.compose.material.icons.filled.Undo
-import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.AutoFixHigh
+import androidx.compose.material.icons.outlined.Backspace
+import androidx.compose.material.icons.outlined.Brush
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.DocumentScanner
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ElectricBolt
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Functions
+import androidx.compose.material.icons.outlined.IosShare
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.ModeEditOutline
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Redo
+import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.SmartDisplay
+import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material.icons.outlined.StickyNote2
+import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.Title
+import androidx.compose.material.icons.outlined.Undo
+import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -110,6 +117,7 @@ import de.graetz.electronote.canvas.PaperStyle
 import de.graetz.electronote.canvas.StickyNoteElement
 import de.graetz.electronote.canvas.TextElement
 import de.graetz.electronote.data.NotebookDocument
+import de.graetz.electronote.data.NotebookDocumentSummary
 import de.graetz.electronote.data.NotebookStore
 import de.graetz.electronote.electrical.CircuitSymbolPickerDialog
 import de.graetz.electronote.electrical.ElektroSimDialog
@@ -131,6 +139,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.text.DateFormat
+import java.util.Date
 
 // Matches the iPad app's row-2 color set (white included for writing on dark paper).
 private val PALETTE = listOf(
@@ -167,6 +177,16 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     var showBookmarksMenu by remember { mutableStateOf(false) }
     var showAddBookmarkDialog by remember { mutableStateOf(false) }
 
+    // Master-detail sidebar (matches the iPad app's collapsible "Alle Elemente" panel):
+    // switching documents happens in place by changing this instead of leaving the screen.
+    var activeDocumentId by remember { mutableStateOf(documentId) }
+    var showSidebar by remember { mutableStateOf(false) }
+    var sidebarDocuments by remember { mutableStateOf<List<NotebookDocumentSummary>>(emptyList()) }
+
+    fun refreshSidebar() {
+        scope.launch { sidebarDocuments = withContext(Dispatchers.IO) { NotebookStore.listDocuments(context) } }
+    }
+
     suspend fun reloadBackgroundLayers(doc: NotebookDocument) {
         val layers = withContext(Dispatchers.IO) {
             doc.backgrounds.map { bg -> bg to NotebookStore.loadBackgroundImage(context, doc.id, bg.imageFile) }
@@ -195,6 +215,21 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         val doc = document ?: return
         syncDocumentFromCanvas()
         scope.launch(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
+    }
+
+    fun switchToDocument(id: String) {
+        if (id == activeDocumentId) {
+            showSidebar = false
+            return
+        }
+        saveDocument()
+        activeDocumentId = id
+        showSidebar = false
+    }
+
+    fun createNewDocumentFromSidebar() {
+        val newDoc = NotebookStore.createDocument(context, "Notizbuch ${sidebarDocuments.size + 1}")
+        switchToDocument(newDoc.id)
     }
 
     // Cross-notebook search index: typed text/tags/bookmarks plus an OCR pass over the
@@ -280,8 +315,9 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         }
     }
 
-    LaunchedEffect(documentId) {
-        val loaded = withContext(Dispatchers.IO) { NotebookStore.loadDocument(context, documentId) }
+    LaunchedEffect(activeDocumentId) {
+        isLoading = true
+        val loaded = withContext(Dispatchers.IO) { NotebookStore.loadDocument(context, activeDocumentId) }
         document = loaded
         if (loaded != null) {
             controller.canvasHeightPx = loaded.canvasHeightPx
@@ -695,36 +731,44 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                 TopAppBar(
                     title = { Text(document?.name ?: "") },
                     navigationIcon = {
-                        IconButton(onClick = { saveAndIndexThenBack() }) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = "Zurück")
+                        Row {
+                            IconButton(onClick = {
+                                showSidebar = !showSidebar
+                                if (showSidebar) refreshSidebar()
+                            }) {
+                                Icon(Icons.Outlined.Menu, contentDescription = "Notizbücher")
+                            }
+                            IconButton(onClick = { saveAndIndexThenBack() }) {
+                                Icon(Icons.Outlined.ArrowBack, contentDescription = "Zurück")
+                            }
                         }
                     },
                     actions = {
                         IconButton(onClick = { controller.undo() }, enabled = controller.hasUndo) {
-                            Icon(Icons.Filled.Undo, contentDescription = "Rückgängig")
+                            Icon(Icons.Outlined.Undo, contentDescription = "Rückgängig")
                         }
                         IconButton(onClick = { controller.redo() }, enabled = controller.hasRedo) {
-                            Icon(Icons.Filled.Redo, contentDescription = "Wiederholen")
+                            Icon(Icons.Outlined.Redo, contentDescription = "Wiederholen")
                         }
                         IconButton(onClick = { AppPreferences.toggleDarkMode(context) }) {
                             Icon(
-                                if (AppPreferences.isDarkMode) Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                                if (AppPreferences.isDarkMode) Icons.Outlined.DarkMode else Icons.Outlined.LightMode,
                                 contentDescription = "Dunkelmodus umschalten"
                             )
                         }
                         IconButton(onClick = { saveDocument() }) {
-                            Icon(Icons.Filled.Save, contentDescription = "Speichern")
+                            Icon(Icons.Outlined.Save, contentDescription = "Speichern")
                         }
                         IconButton(onClick = { showLiveCastSheet = true }) {
                             Icon(
-                                Icons.Filled.Wifi,
+                                Icons.Outlined.Wifi,
                                 contentDescription = "Live-Übertragung",
                                 tint = if (LiveCastServer.isStreaming) IosColors.Red else LocalContentColor.current
                             )
                         }
                         Box {
                             IconButton(onClick = { showAiMenu = true }) {
-                                Icon(Icons.Filled.SmartToy, contentDescription = "KI-Assistent")
+                                Icon(Icons.Outlined.SmartToy, contentDescription = "KI-Assistent")
                             }
                             DropdownMenu(expanded = showAiMenu, onDismissRequest = { showAiMenu = false }) {
                                 for (provider in AiProvider.entries) {
@@ -741,7 +785,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         Box {
                             ActionPill(
                                 label = "Einfügen",
-                                icon = Icons.Filled.Add,
+                                icon = Icons.Outlined.Add,
                                 color = IosColors.Blue,
                                 onClick = { showInsertMenu = true }
                             )
@@ -777,7 +821,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         }
                         Box {
                             IconButton(onClick = { showMoreMenu = true }) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = "Mehr")
+                                Icon(Icons.Outlined.MoreVert, contentDescription = "Mehr")
                             }
                             DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
                                 DropdownMenuItem(
@@ -844,16 +888,16 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ToolToggle(Icons.Filled.Edit, "Stift", currentTool == DrawTool.PEN) {
+                    ToolToggle(Icons.Outlined.Edit, "Stift", currentTool == DrawTool.PEN) {
                         currentTool = DrawTool.PEN; controller.setTool(DrawTool.PEN)
                     }
-                    ToolToggle(Icons.Filled.Brush, "Marker", currentTool == DrawTool.MARKER) {
+                    ToolToggle(Icons.Outlined.Brush, "Marker", currentTool == DrawTool.MARKER) {
                         currentTool = DrawTool.MARKER; controller.setTool(DrawTool.MARKER)
                     }
-                    ToolToggle(Icons.Filled.ModeEditOutline, "Bleistift", currentTool == DrawTool.PENCIL) {
+                    ToolToggle(Icons.Outlined.ModeEditOutline, "Bleistift", currentTool == DrawTool.PENCIL) {
                         currentTool = DrawTool.PENCIL; controller.setTool(DrawTool.PENCIL)
                     }
-                    ToolToggle(Icons.Filled.Backspace, "Radierer", currentTool == DrawTool.ERASER) {
+                    ToolToggle(Icons.Outlined.Backspace, "Radierer", currentTool == DrawTool.ERASER) {
                         currentTool = DrawTool.ERASER; controller.setTool(DrawTool.ERASER)
                     }
 
@@ -875,7 +919,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         ) {
                             if (selectedColorArgb == c) {
                                 Icon(
-                                    Icons.Filled.Check,
+                                    Icons.Outlined.Check,
                                     contentDescription = null,
                                     tint = if (c == AndroidColor.WHITE) Color.Black else Color.White,
                                     modifier = Modifier.size(16.dp)
@@ -892,10 +936,10 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             modifier = Modifier
                                 .padding(3.dp)
                                 .size(30.dp)
-                                .clip(CircleShape)
+                                .clip(RoundedCornerShape(50))
                                 .background(
-                                    if (selectedWidthPx == w) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                    else Color.Transparent
+                                    if (selectedWidthPx == w) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                                 )
                                 .clickable {
                                     selectedWidthPx = w
@@ -924,7 +968,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                 ) {
                     ActionPill(
                         label = if (shapeSnapEnabled) "Formen ✓" else "Formen",
-                        icon = Icons.Filled.AutoFixHigh,
+                        icon = Icons.Outlined.AutoFixHigh,
                         color = Color(0xFFE5E5EA),
                         contentColor = Color.Black,
                         onClick = {
@@ -934,50 +978,50 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     )
                     ActionPill(
                         label = "Mathe",
-                        icon = Icons.Filled.Functions,
+                        icon = Icons.Outlined.Functions,
                         color = IosColors.Purple,
                         onClick = { showMathDialog = true }
                     )
                     ActionPill(
                         label = "Schaltplan",
-                        icon = Icons.Filled.ElectricBolt,
+                        icon = Icons.Outlined.ElectricBolt,
                         color = IosColors.Yellow,
                         contentColor = Color.Black,
                         onClick = { showCircuitPicker = true }
                     )
                     ActionPill(
                         label = "Dateien",
-                        icon = Icons.Filled.Folder,
+                        icon = Icons.Outlined.Folder,
                         color = IosColors.Teal,
                         onClick = { pdfPicker.launch(arrayOf("application/pdf")) }
                     )
                     ActionPill(
                         label = "Nextcloud",
-                        icon = Icons.Filled.CloudUpload,
+                        icon = Icons.Outlined.CloudUpload,
                         color = IosColors.Cyan,
                         onClick = { uploadToNextcloud() }
                     )
                     ActionPill(
                         label = "Kamera",
-                        icon = Icons.Filled.PhotoCamera,
+                        icon = Icons.Outlined.PhotoCamera,
                         color = IosColors.Red,
                         onClick = { startPhotoCapture() }
                     )
                     ActionPill(
                         label = "Scannen",
-                        icon = Icons.Filled.DocumentScanner,
+                        icon = Icons.Outlined.DocumentScanner,
                         color = IosColors.Indigo,
                         onClick = { startDocumentScan() }
                     )
                     ActionPill(
                         label = "YouTube",
-                        icon = Icons.Filled.SmartDisplay,
+                        icon = Icons.Outlined.SmartDisplay,
                         color = IosColors.Red,
                         onClick = { showYoutubeDialog = true }
                     )
                     ActionPill(
                         label = "WebView",
-                        icon = Icons.Filled.Public,
+                        icon = Icons.Outlined.Public,
                         color = IosColors.Mint,
                         onClick = { showWebViewDialog = true }
                     )
@@ -985,14 +1029,74 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             }
         }
     ) { padding ->
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(scrollState)
         ) {
-            if (!isLoading && document != null) {
-                InkCanvas(controller = controller, modifier = Modifier.fillMaxWidth())
+            if (showSidebar) {
+                Column(
+                    modifier = Modifier
+                        .width(300.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Alle Elemente", style = MaterialTheme.typography.titleMedium)
+                        IconButton(onClick = { createNewDocumentFromSidebar() }) {
+                            Icon(Icons.Outlined.Add, contentDescription = "Neues Notizbuch")
+                        }
+                    }
+                    HorizontalDivider()
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        items(sidebarDocuments, key = { it.id }) { doc ->
+                            val isActive = doc.id == activeDocumentId
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                        else Color.Transparent
+                                    )
+                                    .clickable { switchToDocument(doc.id) }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Description,
+                                    contentDescription = null,
+                                    tint = IosColors.Orange,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column(modifier = Modifier.padding(start = 10.dp)) {
+                                    Text(doc.name, maxLines = 1)
+                                    Text(
+                                        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                                            .format(Date(doc.updatedAt)),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                VerticalDivider()
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(scrollState)
+            ) {
+                if (!isLoading && document != null) {
+                    InkCanvas(controller = controller, modifier = Modifier.fillMaxWidth())
+                }
             }
         }
     }
@@ -1258,7 +1362,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(style.label())
-                            if (paperStyle == style) Icon(Icons.Filled.Check, contentDescription = null)
+                            if (paperStyle == style) Icon(Icons.Outlined.Check, contentDescription = null)
                         }
                     }
                     HorizontalDivider()
@@ -1281,7 +1385,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(spacing.label)
-                            if (selectedLineSpacing == spacing) Icon(Icons.Filled.Check, contentDescription = null)
+                            if (selectedLineSpacing == spacing) Icon(Icons.Outlined.Check, contentDescription = null)
                         }
                     }
                 }
@@ -1316,7 +1420,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                                 presets = updated
                                 InkPresetStore.save(context, updated)
                             }) {
-                                Icon(Icons.Filled.Delete, contentDescription = "Löschen")
+                                Icon(Icons.Outlined.Delete, contentDescription = "Löschen")
                             }
                         }
                     }
@@ -1360,7 +1464,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                                 document?.bookmarks = updated.toMutableList()
                                 saveDocument()
                             }) {
-                                Icon(Icons.Filled.Delete, contentDescription = "Löschen")
+                                Icon(Icons.Outlined.Delete, contentDescription = "Löschen")
                             }
                         }
                     }
@@ -1440,9 +1544,12 @@ private fun ToolToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, la
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .padding(2.dp)
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent)
+            .size(38.dp)
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (active) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            )
             .clickable(onClick = onClick)
     ) {
         Icon(

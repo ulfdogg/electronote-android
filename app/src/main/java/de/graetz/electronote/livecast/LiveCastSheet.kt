@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -112,7 +112,7 @@ fun LiveCastSheet(onDismiss: () -> Unit) {
                             val cm = context.getSystemService(ClipboardManager::class.java)
                             cm?.setPrimaryClip(ClipData.newPlainText("LiveCast URL", LiveCastServer.serverUrl()))
                         }) {
-                            Icon(Icons.Filled.ContentCopy, contentDescription = "Kopieren")
+                            Icon(Icons.Outlined.ContentCopy, contentDescription = "Kopieren")
                         }
                     }
                     Text("Zuschauer: $viewerCount", style = MaterialTheme.typography.bodySmall)

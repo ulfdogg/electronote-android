@@ -9,10 +9,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,13 +56,13 @@ fun TrashScreen(onBack: () -> Unit) {
                 title = { Text("Papierkorb") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Zurück")
+                        Icon(Icons.Outlined.ArrowBack, contentDescription = "Zurück")
                     }
                 },
                 actions = {
                     if (trashed.isNotEmpty()) {
                         IconButton(onClick = { showEmptyConfirm = true }) {
-                            Icon(Icons.Filled.DeleteSweep, contentDescription = "Papierkorb leeren")
+                            Icon(Icons.Outlined.DeleteSweep, contentDescription = "Papierkorb leeren")
                         }
                     }
                 }
@@ -102,13 +102,13 @@ fun TrashScreen(onBack: () -> Unit) {
                                 NotebookStore.restoreFromTrash(context, doc.id)
                                 refreshKey++
                             }) {
-                                Icon(Icons.Filled.Restore, contentDescription = "Wiederherstellen")
+                                Icon(Icons.Outlined.Restore, contentDescription = "Wiederherstellen")
                             }
                             IconButton(onClick = {
                                 NotebookStore.deleteDocument(context, doc.id)
                                 refreshKey++
                             }) {
-                                Icon(Icons.Filled.DeleteForever, contentDescription = "Endgültig löschen")
+                                Icon(Icons.Outlined.DeleteForever, contentDescription = "Endgültig löschen")
                             }
                         }
                     }
