@@ -29,7 +29,8 @@ fun ActionPill(
     icon: ImageVector,
     color: Color,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    contentColor: Color = Color.White
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -40,9 +41,9 @@ fun ActionPill(
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp)
     ) {
-        Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.height(16.dp))
+        Icon(icon, contentDescription = label, tint = contentColor, modifier = Modifier.height(16.dp))
         Row(modifier = Modifier.padding(start = 5.dp)) {
-            Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text(label, color = contentColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         }
     }
 }

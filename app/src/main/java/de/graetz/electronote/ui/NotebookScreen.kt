@@ -923,9 +923,10 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     ActionPill(
-                        label = "Formen",
+                        label = if (shapeSnapEnabled) "Formen ✓" else "Formen",
                         icon = Icons.Filled.AutoFixHigh,
-                        color = if (shapeSnapEnabled) IosColors.Green else Color(0xFF6E6E73),
+                        color = Color(0xFFE5E5EA),
+                        contentColor = Color.Black,
                         onClick = {
                             shapeSnapEnabled = !shapeSnapEnabled
                             controller.setShapeSnapEnabled(shapeSnapEnabled)
@@ -941,6 +942,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         label = "Schaltplan",
                         icon = Icons.Filled.ElectricBolt,
                         color = IosColors.Yellow,
+                        contentColor = Color.Black,
                         onClick = { showCircuitPicker = true }
                     )
                     ActionPill(
