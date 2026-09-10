@@ -79,7 +79,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -728,155 +727,165 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             Column {
-                TopAppBar(
-                    title = { Text(document?.name ?: "") },
-                    navigationIcon = {
-                        Row {
-                            IconButton(onClick = {
-                                showSidebar = !showSidebar
-                                if (showSidebar) refreshSidebar()
-                            }) {
-                                Icon(Icons.Outlined.Menu, contentDescription = "Notizbücher")
-                            }
-                            IconButton(onClick = { saveAndIndexThenBack() }) {
-                                Icon(Icons.Outlined.ArrowBack, contentDescription = "Zurück")
-                            }
+                // Compact custom top row (not Material3's TopAppBar, which enforces a
+                // taller 64dp minimum) with smaller icon glyphs — matches the iPad app's
+                // denser, more compact toolbar proportions.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = {
+                        showSidebar = !showSidebar
+                        if (showSidebar) refreshSidebar()
+                    }) {
+                        Icon(Icons.Outlined.Menu, contentDescription = "Notizbücher", modifier = Modifier.size(20.dp))
+                    }
+                    IconButton(onClick = { saveAndIndexThenBack() }) {
+                        Icon(Icons.Outlined.ArrowBack, contentDescription = "Zurück", modifier = Modifier.size(20.dp))
+                    }
+                    Text(
+                        document?.name ?: "",
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f).padding(start = 6.dp)
+                    )
+                    IconButton(onClick = { controller.undo() }, enabled = controller.hasUndo) {
+                        Icon(Icons.Outlined.Undo, contentDescription = "Rückgängig", modifier = Modifier.size(20.dp))
+                    }
+                    IconButton(onClick = { controller.redo() }, enabled = controller.hasRedo) {
+                        Icon(Icons.Outlined.Redo, contentDescription = "Wiederholen", modifier = Modifier.size(20.dp))
+                    }
+                    IconButton(onClick = { AppPreferences.toggleDarkMode(context) }) {
+                        Icon(
+                            if (AppPreferences.isDarkMode) Icons.Outlined.DarkMode else Icons.Outlined.LightMode,
+                            contentDescription = "Dunkelmodus umschalten",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    IconButton(onClick = { saveDocument() }) {
+                        Icon(Icons.Outlined.Save, contentDescription = "Speichern", modifier = Modifier.size(20.dp))
+                    }
+                    IconButton(onClick = { showLiveCastSheet = true }) {
+                        Icon(
+                            Icons.Outlined.Wifi,
+                            contentDescription = "Live-Übertragung",
+                            tint = if (LiveCastServer.isStreaming) IosColors.Red else LocalContentColor.current,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Box {
+                        IconButton(onClick = { showAiMenu = true }) {
+                            Icon(Icons.Outlined.SmartToy, contentDescription = "KI-Assistent", modifier = Modifier.size(20.dp))
                         }
-                    },
-                    actions = {
-                        IconButton(onClick = { controller.undo() }, enabled = controller.hasUndo) {
-                            Icon(Icons.Outlined.Undo, contentDescription = "Rückgängig")
-                        }
-                        IconButton(onClick = { controller.redo() }, enabled = controller.hasRedo) {
-                            Icon(Icons.Outlined.Redo, contentDescription = "Wiederholen")
-                        }
-                        IconButton(onClick = { AppPreferences.toggleDarkMode(context) }) {
-                            Icon(
-                                if (AppPreferences.isDarkMode) Icons.Outlined.DarkMode else Icons.Outlined.LightMode,
-                                contentDescription = "Dunkelmodus umschalten"
-                            )
-                        }
-                        IconButton(onClick = { saveDocument() }) {
-                            Icon(Icons.Outlined.Save, contentDescription = "Speichern")
-                        }
-                        IconButton(onClick = { showLiveCastSheet = true }) {
-                            Icon(
-                                Icons.Outlined.Wifi,
-                                contentDescription = "Live-Übertragung",
-                                tint = if (LiveCastServer.isStreaming) IosColors.Red else LocalContentColor.current
-                            )
-                        }
-                        Box {
-                            IconButton(onClick = { showAiMenu = true }) {
-                                Icon(Icons.Outlined.SmartToy, contentDescription = "KI-Assistent")
-                            }
-                            DropdownMenu(expanded = showAiMenu, onDismissRequest = { showAiMenu = false }) {
-                                for (provider in AiProvider.entries) {
-                                    DropdownMenuItem(
-                                        text = { Text(provider.label) },
-                                        onClick = {
-                                            showAiMenu = false
-                                            openAiProvider(context, provider)
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                        Box {
-                            ActionPill(
-                                label = "Einfügen",
-                                icon = Icons.Outlined.Add,
-                                color = IosColors.Blue,
-                                onClick = { showInsertMenu = true }
-                            )
-                            DropdownMenu(expanded = showInsertMenu, onDismissRequest = { showInsertMenu = false }) {
+                        DropdownMenu(expanded = showAiMenu, onDismissRequest = { showAiMenu = false }) {
+                            for (provider in AiProvider.entries) {
                                 DropdownMenuItem(
-                                    text = { Text("Text einfügen") },
+                                    text = { Text(provider.label) },
                                     onClick = {
-                                        showInsertMenu = false
-                                        controller.startTextPlacement()
-                                        Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+                                        showAiMenu = false
+                                        openAiProvider(context, provider)
                                     }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Haftzettel einfügen") },
-                                    onClick = {
-                                        showInsertMenu = false
-                                        controller.startStickyPlacement()
-                                        Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Foto importieren") },
-                                    onClick = {
-                                        showInsertMenu = false
-                                        photoPicker.launch(
-                                            androidx.activity.result.PickVisualMediaRequest(
-                                                ActivityResultContracts.PickVisualMedia.ImageOnly
-                                            )
-                                        )
-                                    }
-                                )
-                            }
-                        }
-                        Box {
-                            IconButton(onClick = { showMoreMenu = true }) {
-                                Icon(Icons.Outlined.MoreVert, contentDescription = "Mehr")
-                            }
-                            DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("Video aus Galerie") },
-                                    onClick = {
-                                        showMoreMenu = false
-                                        videoPicker.launch(
-                                            androidx.activity.result.PickVisualMediaRequest(
-                                                ActivityResultContracts.PickVisualMedia.VideoOnly
-                                            )
-                                        )
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Video mit Kamera aufnehmen") },
-                                    onClick = { showMoreMenu = false; startVideoCapture() }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Handschrift erkennen") },
-                                    onClick = { showMoreMenu = false; startOcr() }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Elektro-Simulator öffnen") },
-                                    onClick = { showMoreMenu = false; showElektroSim = true }
-                                )
-                                HorizontalDivider()
-                                DropdownMenuItem(
-                                    text = { Text("Exportieren…") },
-                                    onClick = {
-                                        showMoreMenu = false
-                                        val name = (document?.name ?: "Notizbuch") + ".pdf"
-                                        pdfExportLauncher.launch(name)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Teilen…") },
-                                    onClick = { showMoreMenu = false; shareAsPdf() }
-                                )
-                                HorizontalDivider()
-                                DropdownMenuItem(
-                                    text = { Text("Papierstil & Zeilenabstand") },
-                                    onClick = { showMoreMenu = false; showPaperDialog = true }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Stift-Presets") },
-                                    onClick = { showMoreMenu = false; showPresetDialog = true }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Lesezeichen") },
-                                    onClick = { showMoreMenu = false; showBookmarksMenu = true }
                                 )
                             }
                         }
                     }
-                )
+                    Box {
+                        ActionPill(
+                            label = "Einfügen",
+                            icon = Icons.Outlined.Add,
+                            color = IosColors.Blue,
+                            onClick = { showInsertMenu = true }
+                        )
+                        DropdownMenu(expanded = showInsertMenu, onDismissRequest = { showInsertMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Text einfügen") },
+                                onClick = {
+                                    showInsertMenu = false
+                                    controller.startTextPlacement()
+                                    Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Haftzettel einfügen") },
+                                onClick = {
+                                    showInsertMenu = false
+                                    controller.startStickyPlacement()
+                                    Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Foto importieren") },
+                                onClick = {
+                                    showInsertMenu = false
+                                    photoPicker.launch(
+                                        androidx.activity.result.PickVisualMediaRequest(
+                                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                                        )
+                                    )
+                                }
+                            )
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { showMoreMenu = true }) {
+                            Icon(Icons.Outlined.MoreVert, contentDescription = "Mehr", modifier = Modifier.size(20.dp))
+                        }
+                        DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Video aus Galerie") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    videoPicker.launch(
+                                        androidx.activity.result.PickVisualMediaRequest(
+                                            ActivityResultContracts.PickVisualMedia.VideoOnly
+                                        )
+                                    )
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Video mit Kamera aufnehmen") },
+                                onClick = { showMoreMenu = false; startVideoCapture() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Handschrift erkennen") },
+                                onClick = { showMoreMenu = false; startOcr() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Elektro-Simulator öffnen") },
+                                onClick = { showMoreMenu = false; showElektroSim = true }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Exportieren…") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    val name = (document?.name ?: "Notizbuch") + ".pdf"
+                                    pdfExportLauncher.launch(name)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Teilen…") },
+                                onClick = { showMoreMenu = false; shareAsPdf() }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Papierstil & Zeilenabstand") },
+                                onClick = { showMoreMenu = false; showPaperDialog = true }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Stift-Presets") },
+                                onClick = { showMoreMenu = false; showPresetDialog = true }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Lesezeichen") },
+                                onClick = { showMoreMenu = false; showBookmarksMenu = true }
+                            )
+                        }
+                    }
+                }
 
                 // Row 2: Werkzeuge (Stift/Marker/Bleistift/Radierer), Farben, Strichstärke —
                 // matches the iPad app's horizontal tool row (no left sidebar).
@@ -884,8 +893,8 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     ToolToggle(Icons.Outlined.Edit, "Stift", currentTool == DrawTool.PEN) {
@@ -908,7 +917,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
                                 .padding(3.dp)
-                                .size(30.dp)
+                                .size(26.dp)
                                 .clip(CircleShape)
                                 .background(Color(c))
                                 .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
@@ -935,7 +944,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
                                 .padding(3.dp)
-                                .size(30.dp)
+                                .size(26.dp)
                                 .clip(RoundedCornerShape(50))
                                 .background(
                                     if (selectedWidthPx == w) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
@@ -962,8 +971,8 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     ActionPill(
@@ -1544,7 +1553,7 @@ private fun ToolToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, la
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .padding(2.dp)
-            .size(38.dp)
+            .size(32.dp)
             .clip(RoundedCornerShape(50))
             .background(
                 if (active) MaterialTheme.colorScheme.primary
@@ -1555,7 +1564,8 @@ private fun ToolToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, la
         Icon(
             icon,
             contentDescription = label,
-            tint = if (active) Color.White else MaterialTheme.colorScheme.onSurface
+            tint = if (active) Color.White else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(18.dp)
         )
     }
 }
