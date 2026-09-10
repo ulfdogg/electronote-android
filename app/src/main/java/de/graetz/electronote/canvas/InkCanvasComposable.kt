@@ -38,6 +38,9 @@ class InkCanvasController {
     var onWantsStickyPlacement: ((Float, Float) -> Unit)? = null
     var onTextTapped: ((TextElement) -> Unit)? = null
     var onStickyTapped: ((StickyNoteElement) -> Unit)? = null
+    // Fires when the View switches tool on its own (stylus barrel button), so the
+    // Compose-side tool selection UI can stay in sync.
+    var onToolChangeRequested: ((DrawTool) -> Unit)? = null
 
     internal fun bind(view: InkCanvasView) {
         this.view = view
@@ -50,6 +53,7 @@ class InkCanvasController {
         view.onStickyNoteTapped = { s -> onStickyTapped?.invoke(s) }
         view.onSelectionMade = { rect -> onSelectionMadeCallback?.invoke(rect) }
         view.onSelectionCancelled = { onSelectionCancelledCallback?.invoke() }
+        view.onToolChangeRequested = { tool -> onToolChangeRequested?.invoke(tool) }
     }
 
     fun undo() = view?.undo()

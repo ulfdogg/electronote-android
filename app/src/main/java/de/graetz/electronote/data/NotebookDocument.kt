@@ -1,5 +1,6 @@
 package de.graetz.electronote.data
 
+import de.graetz.electronote.canvas.Bookmark
 import de.graetz.electronote.canvas.LineSpacing
 import de.graetz.electronote.canvas.PaperStyle
 import de.graetz.electronote.canvas.Stroke
@@ -30,7 +31,13 @@ data class NotebookDocument(
     var strokes: MutableList<Stroke> = mutableListOf(),
     var backgrounds: MutableList<PageBackground> = mutableListOf(),
     var textElements: MutableList<TextElement> = mutableListOf(),
-    var stickyNotes: MutableList<StickyNoteElement> = mutableListOf()
+    var stickyNotes: MutableList<StickyNoteElement> = mutableListOf(),
+    var bookmarks: MutableList<Bookmark> = mutableListOf(),
+    var isFavorite: Boolean = false,
+    var tags: MutableList<String> = mutableListOf(),
+    // Soft-delete: set when moved to trash, cleared on restore. Documents with a non-null
+    // value are hidden from the normal list but recoverable until permanently deleted.
+    var deletedAt: Long? = null
 ) {
     fun toJson(): JSONObject {
         val obj = JSONObject()
@@ -65,6 +72,10 @@ data class NotebookDocument(
         obj.put("backgrounds", JSONArray(backgrounds.map { it.toJson() }))
         obj.put("textElements", JSONArray(textElements.map { it.toJson() }))
         obj.put("stickyNotes", JSONArray(stickyNotes.map { it.toJson() }))
+        obj.put("bookmarks", JSONArray(bookmarks.map { it.toJson() }))
+        obj.put("isFavorite", isFavorite)
+        obj.put("tags", JSONArray(tags))
+        obj.put("deletedAt", deletedAt ?: JSONObject.NULL)
         return obj
     }
 
@@ -109,6 +120,18 @@ data class NotebookDocument(
                 stickyNotes.add(StickyNoteElement.fromJson(stickyArr.getJSONObject(i)))
             }
 
+            val bookmarksArr = obj.optJSONArray("bookmarks") ?: JSONArray()
+            val bookmarks = mutableListOf<Bookmark>()
+            for (i in 0 until bookmarksArr.length()) {
+                bookmarks.add(Bookmark.fromJson(bookmarksArr.getJSONObject(i)))
+            }
+
+            val tagsArr = obj.optJSONArray("tags") ?: JSONArray()
+            val tags = mutableListOf<String>()
+            for (i in 0 until tagsArr.length()) {
+                tags.add(tagsArr.getString(i))
+            }
+
             val paperStyle = try {
                 PaperStyle.valueOf(obj.optString("paperStyle", PaperStyle.LINED.name))
             } catch (e: IllegalArgumentException) {
@@ -137,7 +160,11 @@ data class NotebookDocument(
                 strokes = strokes,
                 backgrounds = backgrounds,
                 textElements = textElements,
-                stickyNotes = stickyNotes
+                stickyNotes = stickyNotes,
+                bookmarks = bookmarks,
+                isFavorite = obj.optBoolean("isFavorite", false),
+                tags = tags,
+                deletedAt = if (obj.has("deletedAt") && !obj.isNull("deletedAt")) obj.getLong("deletedAt") else null
             )
         }
     }
@@ -147,5 +174,8 @@ data class NotebookDocument(
 data class NotebookDocumentSummary(
     val id: String,
     val name: String,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val isFavorite: Boolean = false,
+    val tags: List<String> = emptyList(),
+    val deletedAt: Long? = null
 )

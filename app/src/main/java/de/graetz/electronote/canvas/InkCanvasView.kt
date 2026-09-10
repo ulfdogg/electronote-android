@@ -41,6 +41,7 @@ class InkCanvasView @JvmOverloads constructor(
     var onStickyPlacementRequested: ((Float, Float) -> Unit)? = null
     var onTextElementTapped: ((TextElement) -> Unit)? = null
     var onStickyNoteTapped: ((StickyNoteElement) -> Unit)? = null
+    var onToolChangeRequested: ((DrawTool) -> Unit)? = null
 
     var currentTool: DrawTool = DrawTool.PEN
     var currentColor: Int = Color.BLACK
@@ -76,6 +77,11 @@ class InkCanvasView @JvmOverloads constructor(
         color = Color.parseColor("#C6C9CE")
         style = Paint.Style.FILL
     }
+    private val cornellPaint = Paint().apply {
+        isAntiAlias = false
+        color = Color.parseColor("#AEB2B8")
+        strokeWidth = 2.5f
+    }
     private val selectionStrokePaint = Paint().apply {
         isAntiAlias = true
         style = Paint.Style.STROKE
@@ -95,6 +101,7 @@ class InkCanvasView @JvmOverloads constructor(
         color = Color.parseColor("#9E9E9E")
     }
     private var lastEraserPoint: StrokePoint? = null
+    private var toolBeforeStylusEraser: DrawTool? = null
 
     companion object {
         private const val EXTEND_MARGIN_PX = 320f
@@ -102,6 +109,11 @@ class InkCanvasView @JvmOverloads constructor(
         private const val ERASER_RADIUS_PX = 26f
         private const val GRID_STEP_PX = 44f
         private const val DOT_STEP_PX = 44f
+        // Matches PdfExporter's A4 page slicing (595x842pt) so the Cornell cue-column/
+        // summary layout lines up with actual exported page breaks.
+        private const val CORNELL_PAGE_ASPECT = 842f / 595f
+        private const val CORNELL_CUE_FRACTION = 0.28f
+        private const val CORNELL_SUMMARY_FRACTION = 0.15f
     }
 
     init {
@@ -203,6 +215,24 @@ class InkCanvasView @JvmOverloads constructor(
     // MARK: - Touch handling
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // Android has no single barrel-button gesture that works identically across all
+        // stylus vendors, so the primary button press is used as the equivalent of Apple
+        // Pencil's double-tap: switch to the eraser, press again to switch back.
+        if (event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS &&
+            (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0
+        ) {
+            val previous = toolBeforeStylusEraser
+            if (previous != null) {
+                currentTool = previous
+                toolBeforeStylusEraser = null
+            } else {
+                toolBeforeStylusEraser = currentTool
+                currentTool = DrawTool.ERASER
+            }
+            onToolChangeRequested?.invoke(currentTool)
+            return true
+        }
+
         if (selectionModeActive) return handleSelectionTouch(event)
 
         if (placementMode != PlacementMode.NONE) {
@@ -494,6 +524,24 @@ class InkCanvasView @JvmOverloads constructor(
                         x += DOT_STEP_PX
                     }
                     y += DOT_STEP_PX
+                }
+            }
+            PaperStyle.CORNELL -> {
+                var y = (top / lineSpacingPx).toInt() * lineSpacingPx
+                while (y < bottom) {
+                    canvas.drawLine(0f, y, right, y, gridPaint)
+                    y += lineSpacingPx
+                }
+
+                val pageHeightPx = right * CORNELL_PAGE_ASPECT
+                val cueX = right * CORNELL_CUE_FRACTION
+                val summaryHeightPx = pageHeightPx * CORNELL_SUMMARY_FRACTION
+                var pageTop = (top / pageHeightPx).toInt() * pageHeightPx
+                while (pageTop < bottom) {
+                    val summaryTop = pageTop + pageHeightPx - summaryHeightPx
+                    canvas.drawLine(cueX, pageTop, cueX, summaryTop, cornellPaint)
+                    canvas.drawLine(0f, summaryTop, right, summaryTop, cornellPaint)
+                    pageTop += pageHeightPx
                 }
             }
             PaperStyle.BLANK -> {}

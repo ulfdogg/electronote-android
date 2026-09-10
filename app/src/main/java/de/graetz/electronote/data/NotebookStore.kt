@@ -19,21 +19,39 @@ object NotebookStore {
     fun documentDir(context: Context, id: String): File =
         File(rootDir(context), id).apply { mkdirs() }
 
+    private fun readSummary(dir: File): NotebookDocumentSummary? {
+        val jsonFile = File(dir, "document.json")
+        if (!jsonFile.exists()) return null
+        return runCatching {
+            val obj = JSONObject(jsonFile.readText())
+            val tagsArr = obj.optJSONArray("tags")
+            val tags = mutableListOf<String>()
+            if (tagsArr != null) for (i in 0 until tagsArr.length()) tags.add(tagsArr.getString(i))
+            NotebookDocumentSummary(
+                id = obj.optString("id", dir.name),
+                name = obj.optString("name", "Notizbuch"),
+                updatedAt = obj.optLong("updatedAt", jsonFile.lastModified()),
+                isFavorite = obj.optBoolean("isFavorite", false),
+                tags = tags,
+                deletedAt = if (obj.has("deletedAt") && !obj.isNull("deletedAt")) obj.getLong("deletedAt") else null
+            )
+        }.getOrNull()
+    }
+
     fun listDocuments(context: Context): List<NotebookDocumentSummary> {
         val root = rootDir(context)
         val dirs = root.listFiles { f -> f.isDirectory } ?: return emptyList()
-        return dirs.mapNotNull { dir ->
-            val jsonFile = File(dir, "document.json")
-            if (!jsonFile.exists()) return@mapNotNull null
-            runCatching {
-                val obj = JSONObject(jsonFile.readText())
-                NotebookDocumentSummary(
-                    id = obj.optString("id", dir.name),
-                    name = obj.optString("name", "Notizbuch"),
-                    updatedAt = obj.optLong("updatedAt", jsonFile.lastModified())
-                )
-            }.getOrNull()
-        }.sortedByDescending { it.updatedAt }
+        return dirs.mapNotNull { readSummary(it) }
+            .filter { it.deletedAt == null }
+            .sortedWith(compareByDescending<NotebookDocumentSummary> { it.isFavorite }.thenByDescending { it.updatedAt })
+    }
+
+    fun listTrash(context: Context): List<NotebookDocumentSummary> {
+        val root = rootDir(context)
+        val dirs = root.listFiles { f -> f.isDirectory } ?: return emptyList()
+        return dirs.mapNotNull { readSummary(it) }
+            .filter { it.deletedAt != null }
+            .sortedByDescending { it.deletedAt }
     }
 
     fun loadDocument(context: Context, id: String): NotebookDocument? {
@@ -54,8 +72,37 @@ object NotebookStore {
         return doc
     }
 
+    /** Permanently deletes a document — only call this from the trash view. */
     fun deleteDocument(context: Context, id: String) {
         documentDir(context, id).deleteRecursively()
+    }
+
+    fun moveToTrash(context: Context, id: String) {
+        val doc = loadDocument(context, id) ?: return
+        doc.deletedAt = System.currentTimeMillis()
+        saveDocument(context, doc)
+    }
+
+    fun restoreFromTrash(context: Context, id: String) {
+        val doc = loadDocument(context, id) ?: return
+        doc.deletedAt = null
+        saveDocument(context, doc)
+    }
+
+    fun emptyTrash(context: Context) {
+        listTrash(context).forEach { deleteDocument(context, it.id) }
+    }
+
+    fun setFavorite(context: Context, id: String, favorite: Boolean) {
+        val doc = loadDocument(context, id) ?: return
+        doc.isFavorite = favorite
+        saveDocument(context, doc)
+    }
+
+    fun setTags(context: Context, id: String, tags: List<String>) {
+        val doc = loadDocument(context, id) ?: return
+        doc.tags = tags.toMutableList()
+        saveDocument(context, doc)
     }
 
     /** Saves a background layer bitmap (e.g. a rendered PDF page) and returns its filename. */

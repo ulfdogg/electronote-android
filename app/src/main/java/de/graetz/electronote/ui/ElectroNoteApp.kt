@@ -36,11 +36,18 @@ fun ElectroNoteApp() {
                 rootView.keepScreenOn = LiveCastServer.isStreaming
             }
 
+            var showTrash by remember { mutableStateOf(false) }
+
             val documentId = openDocumentId
-            if (documentId == null) {
-                DocumentListScreen(onOpenDocument = { openDocumentId = it })
-            } else {
+            if (documentId != null) {
                 NotebookScreen(documentId = documentId, onBack = { openDocumentId = null })
+            } else if (showTrash) {
+                TrashScreen(onBack = { showTrash = false })
+            } else {
+                DocumentListScreen(
+                    onOpenDocument = { openDocumentId = it },
+                    onOpenTrash = { showTrash = true }
+                )
             }
         }
     }

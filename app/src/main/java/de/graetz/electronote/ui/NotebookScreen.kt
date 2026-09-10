@@ -1,6 +1,7 @@
 package de.graetz.electronote.ui
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.widget.Toast
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
@@ -44,6 +46,7 @@ import androidx.compose.material.icons.filled.ModeEditOutline
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material.icons.filled.TextFields
@@ -79,12 +82,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanner
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import de.graetz.electronote.ai.AiProvider
 import de.graetz.electronote.ai.openAiProvider
+import de.graetz.electronote.canvas.Bookmark
 import de.graetz.electronote.canvas.DrawTool
 import de.graetz.electronote.canvas.InkCanvas
 import de.graetz.electronote.canvas.InkCanvasController
@@ -108,6 +113,8 @@ import de.graetz.electronote.ui.theme.IosColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
 private val PALETTE = listOf(
     AndroidColor.BLACK,
@@ -129,6 +136,9 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
 
     var document by remember { mutableStateOf<NotebookDocument?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+    var bookmarks by remember { mutableStateOf<List<Bookmark>>(emptyList()) }
+    var showBookmarksMenu by remember { mutableStateOf(false) }
+    var showAddBookmarkDialog by remember { mutableStateOf(false) }
 
     suspend fun reloadBackgroundLayers(doc: NotebookDocument) {
         val layers = withContext(Dispatchers.IO) {
@@ -160,6 +170,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             controller.setStrokes(loaded.strokes)
             controller.setTextElements(loaded.textElements)
             controller.setStickyNotes(loaded.stickyNotes)
+            bookmarks = loaded.bookmarks
             reloadBackgroundLayers(loaded)
         }
         isLoading = false
@@ -294,6 +305,28 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         }
     }
 
+    // Teilen: renders the current document to a PDF in the app's cache dir and hands it
+    // to the native Android share sheet (Mail/WhatsApp/Nearby Share/…), unlike the
+    // "Exportieren" pill which saves to a location the user picks (Drive, Nextcloud, …).
+    fun shareAsPdf() {
+        val doc = document ?: return
+        syncDocumentFromCanvas()
+        scope.launch(Dispatchers.IO) {
+            val sharedDir = File(context.cacheDir, "shared").apply { mkdirs() }
+            val file = File(sharedDir, "${doc.name}.pdf")
+            FileOutputStream(file).use { out -> PdfExporter.export(context, doc, out) }
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            withContext(Dispatchers.Main) {
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/pdf"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(intent, "Notizbuch teilen"))
+            }
+        }
+    }
+
     // OCR
     var ocrResultText by remember { mutableStateOf<String?>(null) }
     val clipboardManager = LocalClipboardManager.current
@@ -342,6 +375,9 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     controller.onStickyTapped = { s -> editingStickyNote = s }
 
     var currentTool by remember { mutableStateOf(DrawTool.PEN) }
+    // Mirrors Apple Pencil's double-tap-to-switch-tool: Android has no single gesture
+    // that works across all stylus vendors, so the stylus barrel button is used instead.
+    controller.onToolChangeRequested = { tool -> currentTool = tool }
     var shapeSnapEnabled by remember { mutableStateOf(false) }
     var selectedWidthPx by remember { mutableStateOf(STROKE_WIDTHS[1]) }
     var paperStyle by remember { mutableStateOf(PaperStyle.LINED) }
@@ -494,6 +530,12 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             val name = (document?.name ?: "Notizbuch") + ".pdf"
                             pdfExportLauncher.launch(name)
                         }
+                    )
+                    ActionPill(
+                        label = "Teilen",
+                        icon = Icons.Filled.Share,
+                        color = IosColors.Mint,
+                        onClick = { shareAsPdf() }
                     )
                     ActionPill(
                         label = "Text erkennen",
@@ -687,6 +729,43 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             )
                         }
                     }
+
+                    Box {
+                        SidebarButton(Icons.Filled.Bookmark, "Marken", false) { showBookmarksMenu = true }
+                        DropdownMenu(expanded = showBookmarksMenu, onDismissRequest = { showBookmarksMenu = false }) {
+                            if (bookmarks.isEmpty()) {
+                                DropdownMenuItem(text = { Text("Keine Lesezeichen") }, onClick = {}, enabled = false)
+                            }
+                            for (bm in bookmarks) {
+                                DropdownMenuItem(
+                                    text = { Text(bm.name) },
+                                    trailingIcon = {
+                                        IconButton(onClick = {
+                                            val updated = bookmarks.filterNot { it.id == bm.id }
+                                            bookmarks = updated
+                                            document?.bookmarks = updated.toMutableList()
+                                            saveDocument()
+                                        }) {
+                                            Icon(Icons.Filled.Delete, contentDescription = "Löschen")
+                                        }
+                                    },
+                                    onClick = {
+                                        showBookmarksMenu = false
+                                        scope.launch { scrollState.animateScrollTo(bm.yOffsetPx) }
+                                    }
+                                )
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Hier Lesezeichen setzen…") },
+                                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                                onClick = {
+                                    showBookmarksMenu = false
+                                    showAddBookmarkDialog = true
+                                }
+                            )
+                        }
+                    }
                 }
             }
 
@@ -816,6 +895,31 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         )
     }
 
+    if (showAddBookmarkDialog) {
+        var input by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showAddBookmarkDialog = false },
+            title = { Text("Lesezeichen setzen") },
+            text = {
+                OutlinedTextField(value = input, onValueChange = { input = it }, placeholder = { Text("Name…") })
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val name = input.ifBlank { "Lesezeichen ${bookmarks.size + 1}" }
+                    val bm = Bookmark(name = name, yOffsetPx = scrollState.value)
+                    val updated = bookmarks + bm
+                    bookmarks = updated
+                    document?.bookmarks = updated.toMutableList()
+                    saveDocument()
+                    showAddBookmarkDialog = false
+                }) { Text("Setzen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddBookmarkDialog = false }) { Text("Abbrechen") }
+            }
+        )
+    }
+
     if (showSavePresetDialog) {
         AlertDialog(
             onDismissRequest = { showSavePresetDialog = false; newPresetName = "" },
@@ -897,4 +1001,5 @@ private fun PaperStyle.label(): String = when (this) {
     PaperStyle.GRID -> "Kariert"
     PaperStyle.LINED -> "Liniert"
     PaperStyle.DOTTED -> "Punktraster"
+    PaperStyle.CORNELL -> "Cornell"
 }
