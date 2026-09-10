@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -79,6 +78,18 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
         topBar = {
             TopAppBar(
                 title = { Text("ElectroNote") },
+                navigationIcon = {
+                    // iOS puts "new document" as a plain toolbar button, not a floating
+                    // action button (a Material pattern with no iPad equivalent).
+                    IconButton(onClick = {
+                        val count = documents.size + 1
+                        val doc = NotebookStore.createDocument(context, "Notizbuch $count")
+                        refreshKey++
+                        onOpenDocument(doc.id)
+                    }) {
+                        Icon(Icons.Filled.Add, contentDescription = "Neues Notizbuch")
+                    }
+                },
                 actions = {
                     IconButton(onClick = onOpenSearch) {
                         Icon(Icons.Filled.Search, contentDescription = "Suchen")
@@ -100,16 +111,6 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
                     }
                 }
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = {
-                val count = documents.size + 1
-                val doc = NotebookStore.createDocument(context, "Notizbuch $count")
-                refreshKey++
-                onOpenDocument(doc.id)
-            }) {
-                Icon(Icons.Filled.Add, contentDescription = "Neues Notizbuch")
-            }
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -141,7 +142,7 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
 
             if (visibleDocuments.isEmpty()) {
                 Text(
-                    text = if (documents.isEmpty()) "Noch keine Notizbücher. Tippe unten rechts auf + zum Anlegen." else "Keine Notizbücher mit diesem Tag.",
+                    text = if (documents.isEmpty()) "Noch keine Notizbücher. Tippe oben links auf + zum Anlegen." else "Keine Notizbücher mit diesem Tag.",
                     modifier = Modifier.padding(24.dp)
                 )
             } else {
@@ -170,7 +171,7 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
                                         Icon(
                                             Icons.Filled.Description,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary
+                                            tint = IosColors.Orange
                                         )
                                         Column(modifier = Modifier.padding(start = 12.dp)) {
                                             Text(doc.name)
