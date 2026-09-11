@@ -54,8 +54,28 @@ object NextcloudWebDav {
         return ensureDirectory(credentials, "/${encodeSegment(ROOT_FOLDER)}/${encodeSegment(folderName)}")
     }
 
-    fun uploadFile(credentials: NextcloudCredentials, folderName: String, fileName: String, bytes: ByteArray): Boolean {
-        val path = "/${encodeSegment(ROOT_FOLDER)}/${encodeSegment(folderName)}/${encodeSegment(fileName)}"
+    /**
+     * Creates any intermediate subdirectories of [relativeFilePath] (e.g. "images/foo.png"
+     * → creates ".../<folderName>/images") so files can live in iOS-style subfolders
+     * (pdfs/, images/, videos/) instead of flat inside the document folder.
+     */
+    private fun ensureParentDirs(credentials: NextcloudCredentials, folderName: String, relativeFilePath: String) {
+        val segments = relativeFilePath.split("/").dropLast(1)
+        var path = "/${encodeSegment(ROOT_FOLDER)}/${encodeSegment(folderName)}"
+        for (seg in segments) {
+            path += "/${encodeSegment(seg)}"
+            ensureDirectory(credentials, path)
+        }
+    }
+
+    private fun encodedFilePath(folderName: String, relativeFilePath: String): String =
+        "/${encodeSegment(ROOT_FOLDER)}/${encodeSegment(folderName)}/" +
+            relativeFilePath.split("/").joinToString("/") { encodeSegment(it) }
+
+    /** [relativeFilePath] may contain '/' to place the file in an iOS-style subfolder. */
+    fun uploadFile(credentials: NextcloudCredentials, folderName: String, relativeFilePath: String, bytes: ByteArray): Boolean {
+        if (relativeFilePath.contains("/")) ensureParentDirs(credentials, folderName, relativeFilePath)
+        val path = encodedFilePath(folderName, relativeFilePath)
         val conn = connection(credentials, path, "PUT")
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "application/octet-stream")
@@ -69,8 +89,8 @@ object NextcloudWebDav {
         }
     }
 
-    fun downloadFile(credentials: NextcloudCredentials, folderName: String, fileName: String): ByteArray? {
-        val path = "/${encodeSegment(ROOT_FOLDER)}/${encodeSegment(folderName)}/${encodeSegment(fileName)}"
+    fun downloadFile(credentials: NextcloudCredentials, folderName: String, relativeFilePath: String): ByteArray? {
+        val path = encodedFilePath(folderName, relativeFilePath)
         val conn = connection(credentials, path, "GET")
         return try {
             if (conn.responseCode !in 200..299) {
@@ -83,6 +103,68 @@ object NextcloudWebDav {
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** Lists filenames (not full paths) directly inside `<folderName>/<subPath>`. */
+    fun listFiles(credentials: NextcloudCredentials, folderName: String, subPath: String): List<String> {
+        val dirPath = if (subPath.isEmpty()) {
+            "/${encodeSegment(ROOT_FOLDER)}/${encodeSegment(folderName)}/"
+        } else {
+            "/${encodeSegment(ROOT_FOLDER)}/${encodeSegment(folderName)}/" +
+                subPath.split("/").joinToString("/") { encodeSegment(it) } + "/"
+        }
+        val conn = connection(credentials, dirPath, "PROPFIND")
+        conn.setRequestProperty("Depth", "1")
+        conn.doOutput = true
+        val requestBody = """<?xml version="1.0"?>
+            <d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>
+        """.trimIndent()
+        return try {
+            conn.outputStream.use { it.write(requestBody.toByteArray()) }
+            if (conn.responseCode !in 200..299) {
+                conn.disconnect()
+                return emptyList()
+            }
+            val xml = conn.inputStream.bufferedReader().use { it.readText() }
+            conn.disconnect()
+            parseFileEntries(xml)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun parseFileEntries(xml: String): List<String> {
+        val results = mutableListOf<String>()
+        try {
+            val parser = Xml.newPullParser()
+            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
+            parser.setInput(StringReader(xml))
+
+            var currentHref: String? = null
+            var isCollection = false
+            var event = parser.eventType
+            while (event != XmlPullParser.END_DOCUMENT) {
+                when (event) {
+                    XmlPullParser.START_TAG -> when (parser.name) {
+                        "response" -> { currentHref = null; isCollection = false }
+                        "href" -> currentHref = parser.nextText()
+                        "collection" -> isCollection = true
+                    }
+                    XmlPullParser.END_TAG -> if (parser.name == "response") {
+                        val href = currentHref
+                        if (!isCollection && href != null) {
+                            val decoded = URLDecoder.decode(href, "UTF-8")
+                            val name = decoded.trimEnd('/').substringAfterLast('/')
+                            if (name.isNotEmpty()) results.add(name)
+                        }
+                    }
+                }
+                event = parser.next()
+            }
+        } catch (e: Exception) {
+            return emptyList()
+        }
+        return results
     }
 
     /** Lists document folders under /ElectroNote/ so the user can pick one to download. */

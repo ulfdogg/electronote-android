@@ -84,7 +84,7 @@ fun NextcloudDownloadDialog(onDismiss: () -> Unit, onDownloaded: (NotebookDocume
                                     .padding(vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(entry.folderName, modifier = Modifier.weight(1f))
+                                Text(entry.folderName.substringBeforeLast("."), modifier = Modifier.weight(1f))
                                 if (downloadingFolder == entry.folderName) {
                                     CircularProgressIndicator(modifier = Modifier.size(18.dp))
                                 }

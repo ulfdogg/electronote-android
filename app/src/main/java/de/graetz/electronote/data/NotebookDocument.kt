@@ -194,5 +194,6 @@ data class NotebookDocumentSummary(
     val tags: List<String> = emptyList(),
     val deletedAt: Long? = null,
     val searchText: String = "",
-    val docType: String = NotebookDocument.DOC_TYPE_NOTEBOOK
+    val docType: String = NotebookDocument.DOC_TYPE_NOTEBOOK,
+    val remoteFolderName: String? = null
 )

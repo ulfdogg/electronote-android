@@ -12,8 +12,8 @@ android {
         applicationId = "de.graetz.electronote"
         minSdk = 26
         targetSdk = 34
-        versionCode = 22
-        versionName = "0.17.0"
+        versionCode = 23
+        versionName = "0.18.0"
     }
 
     signingConfigs {

@@ -59,7 +59,8 @@ object NotebookStore {
                 tags = meta.tags,
                 deletedAt = meta.deletedAt,
                 docType = obj.optString("docType", NotebookDocument.DOC_TYPE_NOTEBOOK),
-                searchText = meta.searchText
+                searchText = meta.searchText,
+                remoteFolderName = if (obj.has("remoteFolderName") && !obj.isNull("remoteFolderName")) obj.getString("remoteFolderName") else null
             )
         }.getOrNull()
     }

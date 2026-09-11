@@ -223,7 +223,12 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         doc.stickyNotes = controller.getStickyNotes().toMutableList()
         doc.imageElements = controller.getImageElements().toMutableList()
         doc.canvasHeightPx = controller.canvasHeightPx
-        if (controller.canvasWidthPx > 0) doc.canvasWidthPx = controller.canvasWidthPx
+        // Only ever set once, on a brand-new document — an existing document's width must
+        // stay fixed once content has been positioned relative to it, otherwise opening the
+        // same notebook on a second device (different screen width) would silently shift
+        // every stroke/text/image (and break the iOS coordinate bridge in IosDocumentBridge,
+        // which assumes a document's own canvasWidthPx is stable).
+        if (doc.canvasWidthPx == 0 && controller.canvasWidthPx > 0) doc.canvasWidthPx = controller.canvasWidthPx
     }
 
     fun saveDocument() {
@@ -352,7 +357,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         document?.canvasHeightPx = controller.canvasHeightPx
     }
     LaunchedEffect(controller.canvasWidthPx) {
-        if (controller.canvasWidthPx > 0) document?.canvasWidthPx = controller.canvasWidthPx
+        document?.let { doc -> if (doc.canvasWidthPx == 0 && controller.canvasWidthPx > 0) doc.canvasWidthPx = controller.canvasWidthPx }
     }
     LaunchedEffect(AppPreferences.isDarkMode) {
         controller.setDarkPaper(AppPreferences.isDarkMode)
