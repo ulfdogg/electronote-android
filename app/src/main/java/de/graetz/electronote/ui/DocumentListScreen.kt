@@ -79,11 +79,17 @@ import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 
-private sealed class BrowserItem(val id: String, val name: String, val updatedAt: Long) {
+private sealed class BrowserItem(
+    val id: String,
+    val name: String,
+    val updatedAt: Long,
+    val tags: List<String>,
+    val isFavorite: Boolean
+) {
     class Notebook(val summary: NotebookDocumentSummary) :
-        BrowserItem(summary.id, summary.name, summary.updatedAt)
+        BrowserItem(summary.id, summary.name, summary.updatedAt, summary.tags, summary.isFavorite)
     class Diagram(val summary: DiagramSummary) :
-        BrowserItem(summary.id, summary.name, summary.updatedAt)
+        BrowserItem(summary.id, summary.name, summary.updatedAt, summary.tags, summary.isFavorite)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -104,7 +110,7 @@ fun DocumentListScreen(
     var showDriveLogin by remember { mutableStateOf(false) }
     var showDriveDownload by remember { mutableStateOf(false) }
     var selectedTag by remember { mutableStateOf<String?>(null) }
-    var editingTagsFor by remember { mutableStateOf<NotebookDocumentSummary?>(null) }
+    var editingTagsFor by remember { mutableStateOf<BrowserItem?>(null) }
     var isImportingPdf by remember { mutableStateOf(false) }
     var showTypePicker by remember { mutableStateOf(false) }
 
@@ -143,13 +149,13 @@ fun DocumentListScreen(
         }
     }
 
-    val allTags = documents.flatMap { it.tags }.distinct().sorted()
+    val allTags = (documents.flatMap { it.tags } + diagrams.flatMap { it.tags }).distinct().sorted()
     val browserItems: List<BrowserItem> = remember(documents, diagrams, selectedTag) {
-        val nb = documents
+        val nb = documents.map { BrowserItem.Notebook(it) }
+        val dg = diagrams.map { BrowserItem.Diagram(it) }
+        (nb + dg)
             .filter { selectedTag == null || selectedTag in it.tags }
-            .map { BrowserItem.Notebook(it) }
-        val dg = if (selectedTag == null) diagrams.map { BrowserItem.Diagram(it) } else emptyList()
-        (nb + dg).sortedByDescending { it.updatedAt }
+            .sortedByDescending { it.updatedAt }
     }
 
     Scaffold(
@@ -254,7 +260,7 @@ fun DocumentListScreen(
                                     NotebookStore.setFavorite(context, item.summary.id, !item.summary.isFavorite)
                                     refreshKey++
                                 },
-                                onEditTags = { editingTagsFor = item.summary },
+                                onEditTags = { editingTagsFor = item },
                                 onDelete = {
                                     NotebookStore.moveToTrash(context, item.summary.id)
                                     refreshKey++
@@ -263,8 +269,13 @@ fun DocumentListScreen(
                             is BrowserItem.Diagram -> DiagramRow(
                                 summary = item.summary,
                                 onOpen = { onOpenDiagram(item.summary.id) },
+                                onToggleFavorite = {
+                                    DiagramStore.setFavorite(context, item.summary.id, !item.summary.isFavorite)
+                                    refreshKey++
+                                },
+                                onEditTags = { editingTagsFor = item },
                                 onDelete = {
-                                    DiagramStore.deleteDiagram(context, item.summary.id)
+                                    DiagramStore.moveToTrash(context, item.summary.id)
                                     refreshKey++
                                 }
                             )
@@ -309,8 +320,8 @@ fun DocumentListScreen(
         )
     }
 
-    editingTagsFor?.let { doc ->
-        var input by remember(doc.id) { mutableStateOf(doc.tags.joinToString(", ")) }
+    editingTagsFor?.let { item ->
+        var input by remember(item.id) { mutableStateOf(item.tags.joinToString(", ")) }
         AlertDialog(
             onDismissRequest = { editingTagsFor = null },
             title = { Text("Tags bearbeiten") },
@@ -324,7 +335,10 @@ fun DocumentListScreen(
             confirmButton = {
                 TextButton(onClick = {
                     val tags = input.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                    NotebookStore.setTags(context, doc.id, tags)
+                    when (item) {
+                        is BrowserItem.Notebook -> NotebookStore.setTags(context, item.id, tags)
+                        is BrowserItem.Diagram -> DiagramStore.setTags(context, item.id, tags)
+                    }
                     editingTagsFor = null
                     refreshKey++
                 }) { Text("Speichern") }
@@ -409,48 +423,57 @@ private fun NotebookRow(
     }
 }
 
-// Diagrams (PAP/MindMap) don't have favorites/tags/trash yet — a plain, permanent delete
-// with confirmation instead, disclosed as a scope simplification vs. notebooks.
 @Composable
-private fun DiagramRow(summary: DiagramSummary, onOpen: () -> Unit, onDelete: () -> Unit) {
-    var confirmDelete by remember { mutableStateOf(false) }
+private fun DiagramRow(
+    summary: DiagramSummary,
+    onOpen: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onEditTags: () -> Unit,
+    onDelete: () -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                Icon(
-                    if (summary.type == DiagramDocument.TYPE_PAP) Icons.Outlined.AccountTree else Icons.Outlined.Hub,
-                    contentDescription = null,
-                    tint = if (summary.type == DiagramDocument.TYPE_PAP) IosColors.Blue else IosColors.Purple
-                )
-                Column(modifier = Modifier.padding(start = 12.dp)) {
-                    Text(summary.name)
-                    Text(
-                        text = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(summary.updatedAt))
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Icon(
+                        if (summary.type == DiagramDocument.TYPE_PAP) Icons.Outlined.AccountTree else Icons.Outlined.Hub,
+                        contentDescription = null,
+                        tint = if (summary.type == DiagramDocument.TYPE_PAP) IosColors.Blue else IosColors.Purple
+                    )
+                    Column(modifier = Modifier.padding(start = 12.dp)) {
+                        Text(summary.name)
+                        Text(
+                            text = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(summary.updatedAt))
+                        )
+                    }
+                }
+                IconButton(onClick = onToggleFavorite) {
+                    Icon(
+                        if (summary.isFavorite) Icons.Outlined.Star else Icons.Outlined.StarBorder,
+                        contentDescription = "Favorit",
+                        tint = if (summary.isFavorite) IosColors.Yellow else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                IconButton(onClick = onEditTags) {
+                    Icon(Icons.Outlined.Label, contentDescription = "Tags bearbeiten")
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "In den Papierkorb")
+                }
             }
-            IconButton(onClick = { confirmDelete = true }) {
-                Icon(Icons.Outlined.Delete, contentDescription = "Löschen")
+            if (summary.tags.isNotEmpty()) {
+                Text(
+                    summary.tags.joinToString(" · "),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 36.dp, top = 2.dp)
+                )
             }
         }
-    }
-
-    if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text("Endgültig löschen?") },
-            text = { Text("\"${summary.name}\" wird unwiderruflich gelöscht (kein Papierkorb für Diagramme).") },
-            confirmButton = {
-                TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Löschen") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("Abbrechen") }
-            }
-        )
     }
 }
 

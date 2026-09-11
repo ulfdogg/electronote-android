@@ -87,6 +87,7 @@ class InkCanvasController {
     fun addStickyNote(note: StickyNoteElement) = view?.addStickyNote(note)
     fun updateOrRemoveStickyNote(id: String, newText: String?, remove: Boolean) =
         view?.updateOrRemoveStickyNote(id, newText, remove)
+    fun updateStickyNoteInk(id: String, strokes: List<Stroke>) = view?.updateStickyNoteInk(id, strokes)
 
     fun setColor(colorArgb: Int) { view?.currentColor = colorArgb }
     fun setWidthPx(widthPx: Float) { view?.currentWidthPx = widthPx }

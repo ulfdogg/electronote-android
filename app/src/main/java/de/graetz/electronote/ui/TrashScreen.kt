@@ -12,9 +12,12 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -33,23 +36,35 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import de.graetz.electronote.data.NotebookDocumentSummary
 import de.graetz.electronote.data.NotebookStore
+import de.graetz.electronote.diagram.DiagramDocument
+import de.graetz.electronote.diagram.DiagramStore
+import de.graetz.electronote.ui.theme.IosColors
 import java.text.DateFormat
 import java.util.Date
+
+private sealed class TrashItem(val id: String, val name: String, val deletedAt: Long?, val icon: ImageVector, val tint: androidx.compose.ui.graphics.Color) {
+    class Notebook(val id0: String, name: String, deletedAt: Long?) :
+        TrashItem(id0, name, deletedAt, Icons.Outlined.Description, IosColors.Orange)
+    class Diagram(val id0: String, name: String, deletedAt: Long?, type: String) :
+        TrashItem(id0, name, deletedAt, if (type == DiagramDocument.TYPE_PAP) Icons.Outlined.AccountTree else Icons.Outlined.Hub, if (type == DiagramDocument.TYPE_PAP) IosColors.Blue else IosColors.Purple)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrashScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    var trashed by remember { mutableStateOf(listOf<NotebookDocumentSummary>()) }
+    var trashed by remember { mutableStateOf(listOf<TrashItem>()) }
     var refreshKey by remember { mutableStateOf(0) }
     var showEmptyConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(refreshKey) {
-        trashed = NotebookStore.listTrash(context)
+        val notebooks = NotebookStore.listTrash(context).map { TrashItem.Notebook(it.id, it.name, it.deletedAt) }
+        val diagrams = DiagramStore.listTrash(context).map { TrashItem.Diagram(it.id, it.name, it.deletedAt, it.type) }
+        trashed = (notebooks + diagrams).sortedByDescending { it.deletedAt }
     }
 
     Scaffold(
@@ -98,7 +113,8 @@ fun TrashScreen(onBack: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
+                            Icon(doc.icon, contentDescription = null, tint = doc.tint)
+                            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                                 Text(doc.name)
                                 Text(
                                     text = "Gelöscht: " + (doc.deletedAt?.let {
@@ -108,13 +124,19 @@ fun TrashScreen(onBack: () -> Unit) {
                                 )
                             }
                             IconButton(onClick = {
-                                NotebookStore.restoreFromTrash(context, doc.id)
+                                when (doc) {
+                                    is TrashItem.Notebook -> NotebookStore.restoreFromTrash(context, doc.id)
+                                    is TrashItem.Diagram -> DiagramStore.restoreFromTrash(context, doc.id)
+                                }
                                 refreshKey++
                             }) {
                                 Icon(Icons.Outlined.Restore, contentDescription = "Wiederherstellen")
                             }
                             IconButton(onClick = {
-                                NotebookStore.deleteDocument(context, doc.id)
+                                when (doc) {
+                                    is TrashItem.Notebook -> NotebookStore.deleteDocument(context, doc.id)
+                                    is TrashItem.Diagram -> DiagramStore.deleteDiagram(context, doc.id)
+                                }
                                 refreshKey++
                             }) {
                                 Icon(Icons.Outlined.DeleteForever, contentDescription = "Endgültig löschen")
@@ -130,10 +152,11 @@ fun TrashScreen(onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { showEmptyConfirm = false },
             title = { Text("Papierkorb leeren?") },
-            text = { Text("Alle Notizbücher im Papierkorb werden endgültig gelöscht. Das kann nicht rückgängig gemacht werden.") },
+            text = { Text("Alles im Papierkorb wird endgültig gelöscht. Das kann nicht rückgängig gemacht werden.") },
             confirmButton = {
                 TextButton(onClick = {
                     NotebookStore.emptyTrash(context)
+                    DiagramStore.emptyTrash(context)
                     showEmptyConfirm = false
                     refreshKey++
                 }) { Text("Endgültig leeren") }

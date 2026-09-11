@@ -22,23 +22,44 @@ object NotebookStore {
     fun documentDir(context: Context, id: String): File =
         File(rootDir(context), id).apply { mkdirs() }
 
-    private fun readSummary(dir: File): NotebookDocumentSummary? {
+    /**
+     * Documents saved before the tags/favorites/trash/searchText fields were moved out into
+     * [DocumentMetadataStore] still have them embedded in their own document.json. The first
+     * time such a document is encountered (no entry yet in the metadata store), those legacy
+     * values are copied over once so nothing the user already set gets silently lost.
+     */
+    private fun migrateLegacyMetadataIfNeeded(context: Context, id: String, obj: JSONObject, known: Set<String>) {
+        if (id in known) return
+        val hasLegacyFields = obj.has("isFavorite") || obj.has("tags") || obj.has("deletedAt") || obj.has("searchText")
+        if (!hasLegacyFields) return
+        val tagsArr = obj.optJSONArray("tags")
+        val tags = mutableListOf<String>()
+        if (tagsArr != null) for (i in 0 until tagsArr.length()) tags.add(tagsArr.getString(i))
+        DocumentMetadataStore.setFavorite(context, id, obj.optBoolean("isFavorite", false))
+        DocumentMetadataStore.setTags(context, id, tags)
+        DocumentMetadataStore.setSearchText(context, id, obj.optString("searchText", ""))
+        if (obj.has("deletedAt") && !obj.isNull("deletedAt")) {
+            DocumentMetadataStore.moveToTrash(context, id)
+        }
+    }
+
+    private fun readSummary(context: Context, dir: File, knownMetadataIds: Set<String>): NotebookDocumentSummary? {
         val jsonFile = File(dir, "document.json")
         if (!jsonFile.exists()) return null
         return runCatching {
             val obj = JSONObject(jsonFile.readText())
-            val tagsArr = obj.optJSONArray("tags")
-            val tags = mutableListOf<String>()
-            if (tagsArr != null) for (i in 0 until tagsArr.length()) tags.add(tagsArr.getString(i))
+            val id = obj.optString("id", dir.name)
+            migrateLegacyMetadataIfNeeded(context, id, obj, knownMetadataIds)
+            val meta = DocumentMetadataStore.get(context, id)
             NotebookDocumentSummary(
-                id = obj.optString("id", dir.name),
+                id = id,
                 name = obj.optString("name", "Notizbuch"),
                 updatedAt = obj.optLong("updatedAt", jsonFile.lastModified()),
-                isFavorite = obj.optBoolean("isFavorite", false),
-                tags = tags,
-                deletedAt = if (obj.has("deletedAt") && !obj.isNull("deletedAt")) obj.getLong("deletedAt") else null,
+                isFavorite = meta.isFavorite,
+                tags = meta.tags,
+                deletedAt = meta.deletedAt,
                 docType = obj.optString("docType", NotebookDocument.DOC_TYPE_NOTEBOOK),
-                searchText = obj.optString("searchText", "")
+                searchText = meta.searchText
             )
         }.getOrNull()
     }
@@ -46,7 +67,8 @@ object NotebookStore {
     fun listDocuments(context: Context): List<NotebookDocumentSummary> {
         val root = rootDir(context)
         val dirs = root.listFiles { f -> f.isDirectory } ?: return emptyList()
-        return dirs.mapNotNull { readSummary(it) }
+        val knownMetadataIds = DocumentMetadataStore.getAll(context).keys
+        return dirs.mapNotNull { readSummary(context, it, knownMetadataIds) }
             .filter { it.deletedAt == null }
             .sortedWith(compareByDescending<NotebookDocumentSummary> { it.isFavorite }.thenByDescending { it.updatedAt })
     }
@@ -54,7 +76,8 @@ object NotebookStore {
     fun listTrash(context: Context): List<NotebookDocumentSummary> {
         val root = rootDir(context)
         val dirs = root.listFiles { f -> f.isDirectory } ?: return emptyList()
-        return dirs.mapNotNull { readSummary(it) }
+        val knownMetadataIds = DocumentMetadataStore.getAll(context).keys
+        return dirs.mapNotNull { readSummary(context, it, knownMetadataIds) }
             .filter { it.deletedAt != null }
             .sortedByDescending { it.deletedAt }
     }
@@ -84,18 +107,15 @@ object NotebookStore {
     /** Permanently deletes a document — only call this from the trash view. */
     fun deleteDocument(context: Context, id: String) {
         documentDir(context, id).deleteRecursively()
+        DocumentMetadataStore.forget(context, id)
     }
 
     fun moveToTrash(context: Context, id: String) {
-        val doc = loadDocument(context, id) ?: return
-        doc.deletedAt = System.currentTimeMillis()
-        saveDocument(context, doc)
+        DocumentMetadataStore.moveToTrash(context, id)
     }
 
     fun restoreFromTrash(context: Context, id: String) {
-        val doc = loadDocument(context, id) ?: return
-        doc.deletedAt = null
-        saveDocument(context, doc)
+        DocumentMetadataStore.restoreFromTrash(context, id)
     }
 
     fun emptyTrash(context: Context) {
@@ -103,15 +123,11 @@ object NotebookStore {
     }
 
     fun setFavorite(context: Context, id: String, favorite: Boolean) {
-        val doc = loadDocument(context, id) ?: return
-        doc.isFavorite = favorite
-        saveDocument(context, doc)
+        DocumentMetadataStore.setFavorite(context, id, favorite)
     }
 
     fun setTags(context: Context, id: String, tags: List<String>) {
-        val doc = loadDocument(context, id) ?: return
-        doc.tags = tags.toMutableList()
-        saveDocument(context, doc)
+        DocumentMetadataStore.setTags(context, id, tags)
     }
 
     /** Saves a background layer bitmap (e.g. a rendered PDF page) and returns its filename. */

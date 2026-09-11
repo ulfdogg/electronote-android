@@ -212,6 +212,11 @@ class InkCanvasView @JvmOverloads constructor(
         invalidate()
     }
 
+    fun updateStickyNoteInk(id: String, strokes: List<Stroke>) {
+        stickyNotes.find { it.id == id }?.inkStrokes = strokes.toMutableList()
+        invalidate()
+    }
+
     fun addImageElement(element: ImageElement, bitmap: Bitmap?) {
         imageElements.add(element to bitmap)
         invalidate()

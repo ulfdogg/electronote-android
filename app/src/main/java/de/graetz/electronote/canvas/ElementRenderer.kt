@@ -58,4 +58,11 @@ fun Canvas.drawStickyNote(note: StickyNoteElement) {
     translate(note.x + 16f, note.y + 16f)
     staticLayout.draw(this)
     restore()
+
+    if (note.inkStrokes.isNotEmpty()) {
+        save()
+        translate(note.x, note.y)
+        for (stroke in note.inkStrokes) drawStroke(stroke)
+        restore()
+    }
 }

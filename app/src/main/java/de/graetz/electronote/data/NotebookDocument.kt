@@ -16,6 +16,10 @@ import java.util.UUID
  * A notebook is one continuous, auto-extending canvas (like the iPad app's infinite
  * notebook) rather than a fixed set of discrete pages. Imported PDFs/photos/scans are
  * stacked as [PageBackground] layers at increasing Y-offsets within that one canvas.
+ *
+ * Deliberately does NOT hold favorite/tags/trash/search-index state — see
+ * [de.graetz.electronote.data.DocumentMetadataStore] for why that lives in a separate
+ * local index instead of here.
  */
 data class NotebookDocument(
     val id: String = UUID.randomUUID().toString(),
@@ -37,15 +41,7 @@ data class NotebookDocument(
     var textElements: MutableList<TextElement> = mutableListOf(),
     var stickyNotes: MutableList<StickyNoteElement> = mutableListOf(),
     var bookmarks: MutableList<Bookmark> = mutableListOf(),
-    var isFavorite: Boolean = false,
-    var tags: MutableList<String> = mutableListOf(),
-    // Soft-delete: set when moved to trash, cleared on restore. Documents with a non-null
-    // value are hidden from the normal list but recoverable until permanently deleted.
-    var deletedAt: Long? = null,
     var imageElements: MutableList<ImageElement> = mutableListOf(),
-    // Plain text extracted from this document (typed text + OCR'd handwriting) for the
-    // cross-notebook search screen. Rebuilt in the background on save.
-    var searchText: String = "",
     // "notebook" (default, vertical-scroll auto-extending page) or "whiteboard" (fixed
     // large canvas, scrolls both directions — see DOC_TYPE_* constants below).
     var docType: String = DOC_TYPE_NOTEBOOK
@@ -85,11 +81,7 @@ data class NotebookDocument(
         obj.put("textElements", JSONArray(textElements.map { it.toJson() }))
         obj.put("stickyNotes", JSONArray(stickyNotes.map { it.toJson() }))
         obj.put("bookmarks", JSONArray(bookmarks.map { it.toJson() }))
-        obj.put("isFavorite", isFavorite)
-        obj.put("tags", JSONArray(tags))
-        obj.put("deletedAt", deletedAt ?: JSONObject.NULL)
         obj.put("imageElements", JSONArray(imageElements.map { it.toJson() }))
-        obj.put("searchText", searchText)
         obj.put("docType", docType)
         return obj
     }
@@ -144,12 +136,6 @@ data class NotebookDocument(
                 bookmarks.add(Bookmark.fromJson(bookmarksArr.getJSONObject(i)))
             }
 
-            val tagsArr = obj.optJSONArray("tags") ?: JSONArray()
-            val tags = mutableListOf<String>()
-            for (i in 0 until tagsArr.length()) {
-                tags.add(tagsArr.getString(i))
-            }
-
             val imageArr = obj.optJSONArray("imageElements") ?: JSONArray()
             val imageElements = mutableListOf<ImageElement>()
             for (i in 0 until imageArr.length()) {
@@ -191,18 +177,15 @@ data class NotebookDocument(
                 textElements = textElements,
                 stickyNotes = stickyNotes,
                 bookmarks = bookmarks,
-                isFavorite = obj.optBoolean("isFavorite", false),
-                tags = tags,
-                deletedAt = if (obj.has("deletedAt") && !obj.isNull("deletedAt")) obj.getLong("deletedAt") else null,
                 imageElements = imageElements,
-                searchText = obj.optString("searchText", ""),
                 docType = obj.optString("docType", DOC_TYPE_NOTEBOOK)
             )
         }
     }
 }
 
-/** Lightweight summary for listing documents without loading all stroke data. */
+/** Lightweight summary for listing documents — assembled by joining the document's own
+ * file with the separate [DocumentMetadataStore] index. */
 data class NotebookDocumentSummary(
     val id: String,
     val name: String,

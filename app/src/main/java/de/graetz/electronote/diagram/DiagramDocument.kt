@@ -53,5 +53,8 @@ data class DiagramSummary(
     val id: String,
     val name: String,
     val type: String,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val isFavorite: Boolean = false,
+    val tags: List<String> = emptyList(),
+    val deletedAt: Long? = null
 )
