@@ -42,7 +42,10 @@ data class NotebookDocument(
     var imageElements: MutableList<ImageElement> = mutableListOf(),
     // Plain text extracted from this document (typed text + OCR'd handwriting) for the
     // cross-notebook search screen. Rebuilt in the background on save.
-    var searchText: String = ""
+    var searchText: String = "",
+    // "notebook" (default, vertical-scroll auto-extending page) or "whiteboard" (fixed
+    // large canvas, scrolls both directions — see DOC_TYPE_* constants below).
+    var docType: String = DOC_TYPE_NOTEBOOK
 ) {
     fun toJson(): JSONObject {
         val obj = JSONObject()
@@ -83,10 +86,14 @@ data class NotebookDocument(
         obj.put("deletedAt", deletedAt ?: JSONObject.NULL)
         obj.put("imageElements", JSONArray(imageElements.map { it.toJson() }))
         obj.put("searchText", searchText)
+        obj.put("docType", docType)
         return obj
     }
 
     companion object {
+        const val DOC_TYPE_NOTEBOOK = "notebook"
+        const val DOC_TYPE_WHITEBOARD = "whiteboard"
+
         fun fromJson(obj: JSONObject): NotebookDocument {
             val strokesArr = obj.optJSONArray("strokes") ?: JSONArray()
             val strokes = mutableListOf<Stroke>()
@@ -179,7 +186,8 @@ data class NotebookDocument(
                 tags = tags,
                 deletedAt = if (obj.has("deletedAt") && !obj.isNull("deletedAt")) obj.getLong("deletedAt") else null,
                 imageElements = imageElements,
-                searchText = obj.optString("searchText", "")
+                searchText = obj.optString("searchText", ""),
+                docType = obj.optString("docType", DOC_TYPE_NOTEBOOK)
             )
         }
     }
@@ -193,5 +201,6 @@ data class NotebookDocumentSummary(
     val isFavorite: Boolean = false,
     val tags: List<String> = emptyList(),
     val deletedAt: Long? = null,
-    val searchText: String = ""
+    val searchText: String = "",
+    val docType: String = NotebookDocument.DOC_TYPE_NOTEBOOK
 )

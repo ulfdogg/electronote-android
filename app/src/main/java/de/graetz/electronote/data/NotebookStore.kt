@@ -36,6 +36,7 @@ object NotebookStore {
                 isFavorite = obj.optBoolean("isFavorite", false),
                 tags = tags,
                 deletedAt = if (obj.has("deletedAt") && !obj.isNull("deletedAt")) obj.getLong("deletedAt") else null,
+                docType = obj.optString("docType", NotebookDocument.DOC_TYPE_NOTEBOOK),
                 searchText = obj.optString("searchText", "")
             )
         }.getOrNull()
@@ -69,8 +70,12 @@ object NotebookStore {
         jsonFile.writeText(document.toJson().toString())
     }
 
-    fun createDocument(context: Context, name: String): NotebookDocument {
-        val doc = NotebookDocument(name = name)
+    fun createDocument(context: Context, name: String, docType: String = NotebookDocument.DOC_TYPE_NOTEBOOK): NotebookDocument {
+        val doc = NotebookDocument(name = name, docType = docType)
+        if (docType == NotebookDocument.DOC_TYPE_WHITEBOARD) {
+            doc.paperStyle = PaperStyle.BLANK
+            doc.canvasHeightPx = 3000
+        }
         saveDocument(context, doc)
         return doc
     }

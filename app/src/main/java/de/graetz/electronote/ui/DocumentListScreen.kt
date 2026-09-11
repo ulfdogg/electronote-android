@@ -15,11 +15,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CloudQueue
@@ -27,12 +29,14 @@ import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.Draw
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -57,8 +61,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import de.graetz.electronote.data.NotebookDocument
 import de.graetz.electronote.data.NotebookDocumentSummary
 import de.graetz.electronote.data.NotebookStore
+import de.graetz.electronote.diagram.DiagramDocument
+import de.graetz.electronote.diagram.DiagramStore
+import de.graetz.electronote.diagram.DiagramSummary
 import de.graetz.electronote.nextcloud.NextcloudDownloadDialog
 import de.graetz.electronote.nextcloud.NextcloudLoginDialog
 import de.graetz.electronote.pdf.PdfImporter
@@ -69,21 +77,36 @@ import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 
+private sealed class BrowserItem(val id: String, val name: String, val updatedAt: Long) {
+    class Notebook(val summary: NotebookDocumentSummary) :
+        BrowserItem(summary.id, summary.name, summary.updatedAt)
+    class Diagram(val summary: DiagramSummary) :
+        BrowserItem(summary.id, summary.name, summary.updatedAt)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit, onOpenSearch: () -> Unit) {
+fun DocumentListScreen(
+    onOpenDocument: (String) -> Unit,
+    onOpenDiagram: (String) -> Unit,
+    onOpenTrash: () -> Unit,
+    onOpenSearch: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var documents by remember { mutableStateOf(listOf<NotebookDocumentSummary>()) }
+    var diagrams by remember { mutableStateOf(listOf<DiagramSummary>()) }
     var refreshKey by remember { mutableStateOf(0) }
     var showNextcloudLogin by remember { mutableStateOf(false) }
     var showNextcloudDownload by remember { mutableStateOf(false) }
     var selectedTag by remember { mutableStateOf<String?>(null) }
     var editingTagsFor by remember { mutableStateOf<NotebookDocumentSummary?>(null) }
     var isImportingPdf by remember { mutableStateOf(false) }
+    var showTypePicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(refreshKey) {
         documents = NotebookStore.listDocuments(context)
+        diagrams = DiagramStore.listDiagrams(context)
     }
 
     // "PDF öffnen & markieren": creates a new notebook seeded with the PDF's pages as
@@ -117,7 +140,13 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
     }
 
     val allTags = documents.flatMap { it.tags }.distinct().sorted()
-    val visibleDocuments = if (selectedTag != null) documents.filter { selectedTag in it.tags } else documents
+    val browserItems: List<BrowserItem> = remember(documents, diagrams, selectedTag) {
+        val nb = documents
+            .filter { selectedTag == null || selectedTag in it.tags }
+            .map { BrowserItem.Notebook(it) }
+        val dg = if (selectedTag == null) diagrams.map { BrowserItem.Diagram(it) } else emptyList()
+        (nb + dg).sortedByDescending { it.updatedAt }
+    }
 
     Scaffold(
         topBar = {
@@ -131,15 +160,8 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // iOS puts "new document" as a plain toolbar button, not a floating
-                // action button (a Material pattern with no iPad equivalent).
-                IconButton(onClick = {
-                    val count = documents.size + 1
-                    val doc = NotebookStore.createDocument(context, "Notizbuch $count")
-                    refreshKey++
-                    onOpenDocument(doc.id)
-                }) {
-                    Icon(Icons.Outlined.Add, contentDescription = "Neues Notizbuch", modifier = Modifier.size(20.dp))
+                IconButton(onClick = { showTypePicker = true }) {
+                    Icon(Icons.Outlined.Add, contentDescription = "Neu", modifier = Modifier.size(20.dp))
                 }
                 Text(
                     "ElectroNote",
@@ -201,9 +223,9 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
                 }
             }
 
-            if (visibleDocuments.isEmpty()) {
+            if (browserItems.isEmpty()) {
                 Text(
-                    text = if (documents.isEmpty()) "Noch keine Notizbücher. Tippe oben links auf + zum Anlegen." else "Keine Notizbücher mit diesem Tag.",
+                    text = if (documents.isEmpty() && diagrams.isEmpty()) "Noch nichts hier. Tippe oben links auf + zum Anlegen." else "Nichts mit diesem Tag.",
                     modifier = Modifier.padding(24.dp)
                 )
             } else {
@@ -213,70 +235,68 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(visibleDocuments, key = { it.id }) { doc ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onOpenDocument(doc.id) }
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Icon(
-                                            Icons.Outlined.Description,
-                                            contentDescription = null,
-                                            tint = IosColors.Orange
-                                        )
-                                        Column(modifier = Modifier.padding(start = 12.dp)) {
-                                            Text(doc.name)
-                                            Text(
-                                                text = DateFormat.getDateTimeInstance(
-                                                    DateFormat.SHORT, DateFormat.SHORT
-                                                ).format(Date(doc.updatedAt))
-                                            )
-                                        }
-                                    }
-                                    IconButton(onClick = {
-                                        NotebookStore.setFavorite(context, doc.id, !doc.isFavorite)
-                                        refreshKey++
-                                    }) {
-                                        Icon(
-                                            if (doc.isFavorite) Icons.Outlined.Star else Icons.Outlined.StarBorder,
-                                            contentDescription = "Favorit",
-                                            tint = if (doc.isFavorite) IosColors.Yellow else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    IconButton(onClick = { editingTagsFor = doc }) {
-                                        Icon(Icons.Outlined.Label, contentDescription = "Tags bearbeiten")
-                                    }
-                                    IconButton(onClick = {
-                                        NotebookStore.moveToTrash(context, doc.id)
-                                        refreshKey++
-                                    }) {
-                                        Icon(Icons.Outlined.Delete, contentDescription = "In den Papierkorb")
-                                    }
+                    items(browserItems, key = { it.id }) { item ->
+                        when (item) {
+                            is BrowserItem.Notebook -> NotebookRow(
+                                doc = item.summary,
+                                onOpen = { onOpenDocument(item.summary.id) },
+                                onToggleFavorite = {
+                                    NotebookStore.setFavorite(context, item.summary.id, !item.summary.isFavorite)
+                                    refreshKey++
+                                },
+                                onEditTags = { editingTagsFor = item.summary },
+                                onDelete = {
+                                    NotebookStore.moveToTrash(context, item.summary.id)
+                                    refreshKey++
                                 }
-                                if (doc.tags.isNotEmpty()) {
-                                    Text(
-                                        doc.tags.joinToString(" · "),
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(start = 36.dp, top = 2.dp)
-                                    )
+                            )
+                            is BrowserItem.Diagram -> DiagramRow(
+                                summary = item.summary,
+                                onOpen = { onOpenDiagram(item.summary.id) },
+                                onDelete = {
+                                    DiagramStore.deleteDiagram(context, item.summary.id)
+                                    refreshKey++
                                 }
-                            }
+                            )
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showTypePicker) {
+        DocumentTypePickerDialog(
+            onDismiss = { showTypePicker = false },
+            onPickNotebook = {
+                showTypePicker = false
+                val count = documents.size + 1
+                val doc = NotebookStore.createDocument(context, "Notizbuch $count")
+                refreshKey++
+                onOpenDocument(doc.id)
+            },
+            onPickWhiteboard = {
+                showTypePicker = false
+                val count = documents.count { it.docType == NotebookDocument.DOC_TYPE_WHITEBOARD } + 1
+                val doc = NotebookStore.createDocument(context, "Whiteboard $count", NotebookDocument.DOC_TYPE_WHITEBOARD)
+                refreshKey++
+                onOpenDocument(doc.id)
+            },
+            onPickPap = {
+                showTypePicker = false
+                val count = diagrams.count { it.type == DiagramDocument.TYPE_PAP } + 1
+                val doc = DiagramStore.createDiagram(context, "Ablaufplan $count", DiagramDocument.TYPE_PAP)
+                refreshKey++
+                onOpenDiagram(doc.id)
+            },
+            onPickMindMap = {
+                showTypePicker = false
+                val count = diagrams.count { it.type == DiagramDocument.TYPE_MINDMAP } + 1
+                val doc = DiagramStore.createDiagram(context, "MindMap $count", DiagramDocument.TYPE_MINDMAP)
+                refreshKey++
+                onOpenDiagram(doc.id)
+            }
+        )
     }
 
     editingTagsFor?.let { doc ->
@@ -313,5 +333,152 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
             onDismiss = { showNextcloudDownload = false },
             onDownloaded = { refreshKey++ }
         )
+    }
+}
+
+@Composable
+private fun NotebookRow(
+    doc: NotebookDocumentSummary,
+    onOpen: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onEditTags: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Icon(
+                        if (doc.docType == NotebookDocument.DOC_TYPE_WHITEBOARD) Icons.Outlined.Draw else Icons.Outlined.Description,
+                        contentDescription = null,
+                        tint = IosColors.Orange
+                    )
+                    Column(modifier = Modifier.padding(start = 12.dp)) {
+                        Text(doc.name)
+                        Text(
+                            text = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(doc.updatedAt))
+                        )
+                    }
+                }
+                IconButton(onClick = onToggleFavorite) {
+                    Icon(
+                        if (doc.isFavorite) Icons.Outlined.Star else Icons.Outlined.StarBorder,
+                        contentDescription = "Favorit",
+                        tint = if (doc.isFavorite) IosColors.Yellow else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onEditTags) {
+                    Icon(Icons.Outlined.Label, contentDescription = "Tags bearbeiten")
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "In den Papierkorb")
+                }
+            }
+            if (doc.tags.isNotEmpty()) {
+                Text(
+                    doc.tags.joinToString(" · "),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 36.dp, top = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+// Diagrams (PAP/MindMap) don't have favorites/tags/trash yet — a plain, permanent delete
+// with confirmation instead, disclosed as a scope simplification vs. notebooks.
+@Composable
+private fun DiagramRow(summary: DiagramSummary, onOpen: () -> Unit, onDelete: () -> Unit) {
+    var confirmDelete by remember { mutableStateOf(false) }
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Icon(
+                    if (summary.type == DiagramDocument.TYPE_PAP) Icons.Outlined.AccountTree else Icons.Outlined.Hub,
+                    contentDescription = null,
+                    tint = if (summary.type == DiagramDocument.TYPE_PAP) IosColors.Blue else IosColors.Purple
+                )
+                Column(modifier = Modifier.padding(start = 12.dp)) {
+                    Text(summary.name)
+                    Text(
+                        text = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(summary.updatedAt))
+                    )
+                }
+            }
+            IconButton(onClick = { confirmDelete = true }) {
+                Icon(Icons.Outlined.Delete, contentDescription = "Löschen")
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Endgültig löschen?") },
+            text = { Text("\"${summary.name}\" wird unwiderruflich gelöscht (kein Papierkorb für Diagramme).") },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Löschen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Abbrechen") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun DocumentTypePickerDialog(
+    onDismiss: () -> Unit,
+    onPickNotebook: () -> Unit,
+    onPickPap: () -> Unit,
+    onPickWhiteboard: () -> Unit,
+    onPickMindMap: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Dokumenttyp wählen") },
+        text = {
+            Column {
+                TypeOption(Icons.Outlined.Description, IosColors.Blue, "Notizbuch", "Endlos langer Zettel zum Schreiben und Zeichnen", onPickNotebook)
+                TypeOption(Icons.Outlined.AccountTree, IosColors.Orange, "Ablaufplan (PAP)", "Programmablaufplan mit Knoten und Verbindungen", onPickPap)
+                TypeOption(Icons.Outlined.Draw, IosColors.Green, "Whiteboard", "Freie Zeichenfläche", onPickWhiteboard)
+                TypeOption(Icons.Outlined.Hub, IosColors.Purple, "MindMap", "Gedankenkarte mit Ästen und Notizen", onPickMindMap)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+        }
+    )
+}
+
+@Composable
+private fun TypeOption(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Color,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.padding(end = 12.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

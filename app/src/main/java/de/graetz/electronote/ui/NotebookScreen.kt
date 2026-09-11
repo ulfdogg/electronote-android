@@ -171,6 +171,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val controller = remember { InkCanvasController() }
     val scrollState = rememberScrollState()
+    val whiteboardHScrollState = rememberScrollState()
 
     var document by remember { mutableStateOf<NotebookDocument?>(null) }
     var isLoading by remember { mutableStateOf(true) }
@@ -751,6 +752,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     // that works across all stylus vendors, so the stylus barrel button is used instead.
     controller.onToolChangeRequested = { tool -> currentTool = tool }
     var shapeSnapEnabled by remember { mutableStateOf(false) }
+    var stylusOnly by remember { mutableStateOf(false) }
     var selectedWidthPx by remember { mutableStateOf(STROKE_WIDTHS[1]) }
     var paperStyle by remember { mutableStateOf(PaperStyle.LINED) }
     var selectedLineSpacing by remember { mutableStateOf(LineSpacing.MEDIUM) }
@@ -779,6 +781,11 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             controller.setPaperStyle(it.paperStyle)
             selectedLineSpacing = it.lineSpacing
             controller.setLineSpacing(it.lineSpacing.px)
+            // Whiteboard: fixed large canvas that scrolls both directions instead of the
+            // notebook's vertical-only auto-extending page (no true pinch-zoom).
+            controller.setCanvasWidthOverride(
+                if (it.docType == NotebookDocument.DOC_TYPE_WHITEBOARD) 3000 else null
+            )
         }
     }
 
@@ -937,6 +944,14 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                                 onClick = { showMoreMenu = false; shareAsPdf() }
                             )
                             HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(if (stylusOnly) "✓ Nur Stift schreibt (Finger scrollt)" else "Nur Stift schreibt (Finger scrollt)") },
+                                onClick = {
+                                    stylusOnly = !stylusOnly
+                                    controller.setStylusOnly(stylusOnly)
+                                    showMoreMenu = false
+                                }
+                            )
                             DropdownMenuItem(
                                 text = { Text("Papierstil & Zeilenabstand") },
                                 onClick = { showMoreMenu = false; showPaperDialog = true }
@@ -1167,6 +1182,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
+                    .horizontalScroll(whiteboardHScrollState)
                     .verticalScroll(scrollState)
             ) {
                 if (!isLoading && document != null) {

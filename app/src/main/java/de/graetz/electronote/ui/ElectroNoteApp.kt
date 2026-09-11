@@ -24,6 +24,7 @@ fun ElectroNoteApp() {
     ElectroNoteTheme(darkTheme = AppPreferences.isDarkMode) {
         Surface(modifier = Modifier) {
             var openDocumentId by remember { mutableStateOf<String?>(null) }
+            var openDiagramId by remember { mutableStateOf<String?>(null) }
 
             val rootView = LocalView.current
             DisposableEffect(rootView) {
@@ -40,8 +41,11 @@ fun ElectroNoteApp() {
             var showSearch by remember { mutableStateOf(false) }
 
             val documentId = openDocumentId
+            val diagramId = openDiagramId
             if (documentId != null) {
                 NotebookScreen(documentId = documentId, onBack = { openDocumentId = null })
+            } else if (diagramId != null) {
+                DiagramScreen(diagramId = diagramId, onBack = { openDiagramId = null })
             } else if (showTrash) {
                 TrashScreen(onBack = { showTrash = false })
             } else if (showSearch) {
@@ -52,6 +56,7 @@ fun ElectroNoteApp() {
             } else {
                 DocumentListScreen(
                     onOpenDocument = { openDocumentId = it },
+                    onOpenDiagram = { openDiagramId = it },
                     onOpenTrash = { showTrash = true },
                     onOpenSearch = { showSearch = true }
                 )

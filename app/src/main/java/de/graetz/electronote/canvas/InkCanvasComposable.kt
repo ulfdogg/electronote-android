@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.RectF
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -31,6 +32,9 @@ class InkCanvasController {
     var canvasHeightPx by mutableIntStateOf(2200)
     var canvasWidthPx by mutableIntStateOf(0)
         private set
+    // Set for whiteboard documents: a fixed canvas width instead of matching the
+    // viewport, so the surrounding container can scroll horizontally too.
+    var canvasWidthOverridePx by mutableStateOf<Int?>(null)
 
     private var onSelectionMadeCallback: ((RectF) -> Unit)? = null
     private var onSelectionCancelledCallback: (() -> Unit)? = null
@@ -88,6 +92,8 @@ class InkCanvasController {
     fun setWidthPx(widthPx: Float) { view?.currentWidthPx = widthPx }
     fun setTool(tool: DrawTool) { view?.currentTool = tool }
     fun setShapeSnapEnabled(enabled: Boolean) { view?.shapeSnapEnabled = enabled }
+    fun setStylusOnly(enabled: Boolean) { view?.stylusOnly = enabled }
+    fun setCanvasWidthOverride(px: Int?) { canvasWidthOverridePx = px }
     fun setPaperStyle(style: PaperStyle) { view?.paperStyle = style }
     fun setLineSpacing(px: Float) { view?.lineSpacingPx = px }
     fun setDarkPaper(dark: Boolean) { view?.setDarkPaper(dark) }
@@ -121,10 +127,14 @@ class InkCanvasController {
 fun InkCanvas(controller: InkCanvasController, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
     val heightDp = with(density) { controller.canvasHeightPx.toDp() }
+    val widthOverride = controller.canvasWidthOverridePx
+    val sizeModifier = if (widthOverride != null) {
+        with(density) { Modifier.width(widthOverride.toDp()).height(heightDp) }
+    } else {
+        Modifier.fillMaxWidth().height(heightDp)
+    }
     AndroidView(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(heightDp),
+        modifier = modifier.then(sizeModifier),
         factory = { context ->
             InkCanvasView(context).also { controller.bind(it) }
         }
