@@ -1,5 +1,9 @@
 package de.graetz.electronote.ui
 
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -7,7 +11,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +29,7 @@ import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
@@ -36,13 +44,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -52,7 +61,11 @@ import de.graetz.electronote.data.NotebookDocumentSummary
 import de.graetz.electronote.data.NotebookStore
 import de.graetz.electronote.nextcloud.NextcloudDownloadDialog
 import de.graetz.electronote.nextcloud.NextcloudLoginDialog
+import de.graetz.electronote.pdf.PdfImporter
 import de.graetz.electronote.ui.theme.IosColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 
@@ -60,15 +73,47 @@ import java.util.Date
 @Composable
 fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit, onOpenSearch: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var documents by remember { mutableStateOf(listOf<NotebookDocumentSummary>()) }
     var refreshKey by remember { mutableStateOf(0) }
     var showNextcloudLogin by remember { mutableStateOf(false) }
     var showNextcloudDownload by remember { mutableStateOf(false) }
     var selectedTag by remember { mutableStateOf<String?>(null) }
     var editingTagsFor by remember { mutableStateOf<NotebookDocumentSummary?>(null) }
+    var isImportingPdf by remember { mutableStateOf(false) }
 
     LaunchedEffect(refreshKey) {
         documents = NotebookStore.listDocuments(context)
+    }
+
+    // "PDF öffnen & markieren": creates a new notebook seeded with the PDF's pages as
+    // full-width backgrounds, ready to draw on immediately — reuses the same import path
+    // as PDF import inside a notebook, just as its own entry point from the list.
+    fun queryPdfDisplayName(uri: Uri): String? {
+        return context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx)?.removeSuffix(".pdf") else null
+        }
+    }
+
+    val openPdfLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        isImportingPdf = true
+        scope.launch {
+            val name = withContext(Dispatchers.IO) { queryPdfDisplayName(uri) } ?: "PDF-Notizbuch"
+            val doc = withContext(Dispatchers.IO) { NotebookStore.createDocument(context, name) }
+            val newBackgrounds = withContext(Dispatchers.IO) { PdfImporter.importPdf(context, uri, doc) }
+            if (newBackgrounds.isNotEmpty()) {
+                doc.backgrounds.addAll(newBackgrounds)
+                val bottom = newBackgrounds.maxOf { it.yOffsetPx + it.heightPx } + 200
+                doc.canvasHeightPx = maxOf(doc.canvasHeightPx, bottom)
+                withContext(Dispatchers.IO) { NotebookStore.saveDocument(context, doc) }
+            }
+            isImportingPdf = false
+            onOpenDocument(doc.id)
+        }
     }
 
     val allTags = documents.flatMap { it.tags }.distinct().sorted()
@@ -76,41 +121,57 @@ fun DocumentListScreen(onOpenDocument: (String) -> Unit, onOpenTrash: () -> Unit
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("ElectroNote") },
-                navigationIcon = {
-                    // iOS puts "new document" as a plain toolbar button, not a floating
-                    // action button (a Material pattern with no iPad equivalent).
-                    IconButton(onClick = {
-                        val count = documents.size + 1
-                        val doc = NotebookStore.createDocument(context, "Notizbuch $count")
-                        refreshKey++
-                        onOpenDocument(doc.id)
-                    }) {
-                        Icon(Icons.Outlined.Add, contentDescription = "Neues Notizbuch")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onOpenSearch) {
-                        Icon(Icons.Outlined.Search, contentDescription = "Suchen")
-                    }
-                    IconButton(onClick = onOpenTrash) {
-                        Icon(Icons.Outlined.DeleteSweep, contentDescription = "Papierkorb")
-                    }
-                    IconButton(onClick = { showNextcloudDownload = true }) {
-                        Icon(Icons.Outlined.CloudDownload, contentDescription = "Von Nextcloud laden")
-                    }
-                    IconButton(onClick = { showNextcloudLogin = true }) {
-                        Icon(Icons.Outlined.CloudQueue, contentDescription = "Nextcloud")
-                    }
-                    IconButton(onClick = { AppPreferences.toggleDarkMode(context) }) {
-                        Icon(
-                            if (AppPreferences.isDarkMode) Icons.Outlined.DarkMode else Icons.Outlined.LightMode,
-                            contentDescription = "Dunkelmodus umschalten"
-                        )
-                    }
+            // Compact custom row (not Material3's TopAppBar, which enforces a taller
+            // 64dp minimum) with smaller icon glyphs, matching the notebook editor.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .height(48.dp)
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // iOS puts "new document" as a plain toolbar button, not a floating
+                // action button (a Material pattern with no iPad equivalent).
+                IconButton(onClick = {
+                    val count = documents.size + 1
+                    val doc = NotebookStore.createDocument(context, "Notizbuch $count")
+                    refreshKey++
+                    onOpenDocument(doc.id)
+                }) {
+                    Icon(Icons.Outlined.Add, contentDescription = "Neues Notizbuch", modifier = Modifier.size(20.dp))
                 }
-            )
+                Text(
+                    "ElectroNote",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f).padding(start = 6.dp)
+                )
+                IconButton(
+                    onClick = { openPdfLauncher.launch(arrayOf("application/pdf")) },
+                    enabled = !isImportingPdf
+                ) {
+                    Icon(Icons.Outlined.PictureAsPdf, contentDescription = "PDF öffnen & markieren", modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onOpenSearch) {
+                    Icon(Icons.Outlined.Search, contentDescription = "Suchen", modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onOpenTrash) {
+                    Icon(Icons.Outlined.DeleteSweep, contentDescription = "Papierkorb", modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = { showNextcloudDownload = true }) {
+                    Icon(Icons.Outlined.CloudDownload, contentDescription = "Von Nextcloud laden", modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = { showNextcloudLogin = true }) {
+                    Icon(Icons.Outlined.CloudQueue, contentDescription = "Nextcloud", modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = { AppPreferences.toggleDarkMode(context) }) {
+                    Icon(
+                        if (AppPreferences.isDarkMode) Icons.Outlined.DarkMode else Icons.Outlined.LightMode,
+                        contentDescription = "Dunkelmodus umschalten",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {

@@ -97,7 +97,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.content.FileProvider
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanner
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -132,6 +131,8 @@ import de.graetz.electronote.media.YoutubeUtil
 import de.graetz.electronote.ocr.HandwritingRecognizer
 import de.graetz.electronote.pdf.PdfExporter
 import de.graetz.electronote.pdf.PdfImporter
+import de.graetz.electronote.stickers.StickerPickerDialog
+import de.graetz.electronote.webclipper.WebClipperDialog
 import de.graetz.electronote.ui.theme.ActionPill
 import de.graetz.electronote.ui.theme.IosColors
 import kotlinx.coroutines.Dispatchers
@@ -520,6 +521,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     // Elektro: Bauteil-Bibliothek (Schaltplan-Pill) + eingebetteter Schaltungs-Simulator ("..."-Menü).
     var showCircuitPicker by remember { mutableStateOf(false) }
     var showElektroSim by remember { mutableStateOf(false) }
+    var showStickerPicker by remember { mutableStateOf(false) }
 
     // Mathe-Modul: Taschenrechner + Handschrift-Formel-Erkennung + Funktionsplotter.
     var showMathDialog by remember { mutableStateOf(false) }
@@ -562,6 +564,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     var editingTextElement by remember { mutableStateOf<TextElement?>(null) }
     var editingStickyNote by remember { mutableStateOf<StickyNoteElement?>(null) }
     var selectedColorArgb by remember { mutableStateOf(PALETTE[0]) }
+    var pendingClipboardText by remember { mutableStateOf<String?>(null) }
 
     controller.onWantsTextPlacement = { x, y -> textPlacementPos = x to y }
     controller.onWantsStickyPlacement = { x, y -> stickyPlacementPos = x to y }
@@ -583,6 +586,44 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         pendingImageInsert = PendingImageInsert(bitmap, kind, videoFilename, youtubeUrl)
         controller.startImagePlacement()
         Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+    }
+
+    // Clipboard: an image clip goes straight to image placement; a text clip pre-fills
+    // the text-placement dialog so the user can still edit it before inserting.
+    fun pasteFromClipboard() {
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+        val clip = clipboard?.primaryClip
+        if (clip == null || clip.itemCount == 0) {
+            Toast.makeText(context, "Zwischenablage ist leer", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val item = clip.getItemAt(0)
+        val uri = item.uri
+        if (uri != null) {
+            scope.launch {
+                val bitmap = withContext(Dispatchers.IO) {
+                    try {
+                        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                if (bitmap != null) {
+                    beginImagePlacement(bitmap, ImageElement.KIND_IMAGE)
+                } else {
+                    Toast.makeText(context, "Konnte Bild nicht aus Zwischenablage laden", Toast.LENGTH_SHORT).show()
+                }
+            }
+            return
+        }
+        val text = item.coerceToText(context)?.toString()
+        if (!text.isNullOrBlank()) {
+            pendingClipboardText = text
+            controller.startTextPlacement()
+            Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Nichts Einfügbares in der Zwischenablage", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // Video: Kamera-Aufnahme, Galerie-Import, YouTube-Einbettung — alle enden als
@@ -680,13 +721,29 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         photoCaptureLauncher.launch(uri)
     }
 
-    // WebView: opens an arbitrary URL via Chrome Custom Tabs — same Google-login-safe
-    // mechanism already used for the AI providers, just for any address the user types.
-    var showWebViewDialog by remember { mutableStateOf(false) }
-    fun openWebViewUrl(url: String) {
-        val normalized = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
-        val intent = CustomTabsIntent.Builder().build()
-        intent.launchUrl(context, Uri.parse(normalized))
+    // Web-Clipper: embedded mini-browser with a "cut out a region" tool (WebView, not
+    // Custom Tabs — capturing a region as a bitmap only works for content actually drawn
+    // inside our own view tree).
+    var showWebClipper by remember { mutableStateOf(false) }
+
+    fun handleWebClipText(bitmap: Bitmap) {
+        scope.launch {
+            val text = try {
+                withContext(Dispatchers.Default) { HandwritingRecognizer.recognize(bitmap) }
+            } catch (e: Exception) {
+                ""
+            } finally {
+                bitmap.recycle()
+            }
+            if (text.isNotBlank()) {
+                pendingClipboardText = text
+                controller.startTextPlacement()
+                showWebClipper = false
+                Toast.makeText(context, "Position zum Einfügen antippen", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Nichts erkannt", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     var currentTool by remember { mutableStateOf(DrawTool.PEN) }
@@ -857,6 +914,14 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             DropdownMenuItem(
                                 text = { Text("Elektro-Simulator öffnen") },
                                 onClick = { showMoreMenu = false; showElektroSim = true }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Aus Zwischenablage einfügen") },
+                                onClick = { showMoreMenu = false; pasteFromClipboard() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Symbol / ClipArt…") },
+                                onClick = { showMoreMenu = false; showStickerPicker = true }
                             )
                             HorizontalDivider()
                             DropdownMenuItem(
@@ -1033,7 +1098,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         label = "WebView",
                         icon = Icons.Outlined.Public,
                         color = IosColors.Mint,
-                        onClick = { showWebViewDialog = true }
+                        onClick = { showWebClipper = true }
                     )
                 }
             }
@@ -1133,7 +1198,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     }
 
     textPlacementPos?.let { (x, y) ->
-        var input by remember(x, y) { mutableStateOf("") }
+        var input by remember(x, y) { mutableStateOf(pendingClipboardText ?: "") }
         AlertDialog(
             onDismissRequest = { textPlacementPos = null },
             title = { Text("Text einfügen") },
@@ -1146,10 +1211,11 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                         controller.addTextElement(TextElement(x = x, y = y, text = input, colorArgb = selectedColorArgb))
                     }
                     textPlacementPos = null
+                    pendingClipboardText = null
                 }) { Text("Einfügen") }
             },
             dismissButton = {
-                TextButton(onClick = { textPlacementPos = null }) { Text("Abbrechen") }
+                TextButton(onClick = { textPlacementPos = null; pendingClipboardText = null }) { Text("Abbrechen") }
             }
         )
     }
@@ -1293,6 +1359,15 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             onDismiss = { showCircuitPicker = false },
             onPick = { bitmap ->
                 beginImagePlacement(bitmap, ImageElement.KIND_CIRCUIT_SYMBOL)
+            }
+        )
+    }
+
+    if (showStickerPicker) {
+        StickerPickerDialog(
+            onDismiss = { showStickerPicker = false },
+            onPick = { bitmap ->
+                beginImagePlacement(bitmap, ImageElement.KIND_IMAGE)
             }
         )
     }
@@ -1491,23 +1566,11 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         )
     }
 
-    if (showWebViewDialog) {
-        var input by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showWebViewDialog = false },
-            title = { Text("Webseite öffnen") },
-            text = {
-                OutlinedTextField(value = input, onValueChange = { input = it }, placeholder = { Text("URL…") })
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showWebViewDialog = false
-                    if (input.isNotBlank()) openWebViewUrl(input)
-                }) { Text("Öffnen") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showWebViewDialog = false }) { Text("Abbrechen") }
-            }
+    if (showWebClipper) {
+        WebClipperDialog(
+            onDismiss = { showWebClipper = false },
+            onInsertImage = { bitmap -> beginImagePlacement(bitmap, ImageElement.KIND_IMAGE) },
+            onRecognizeText = { bitmap -> handleWebClipText(bitmap) }
         )
     }
 
