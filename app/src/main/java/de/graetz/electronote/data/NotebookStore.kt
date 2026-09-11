@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import de.graetz.electronote.canvas.PaperStyle
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
