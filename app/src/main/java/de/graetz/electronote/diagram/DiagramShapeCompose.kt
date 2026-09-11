@@ -24,13 +24,18 @@ private val diamondShape = GenericShape { size, _ ->
 }
 
 fun composeShapeFor(kind: DiagramShapeKind): Shape = when (kind) {
-    DiagramShapeKind.START_END -> RoundedCornerShape(50)
-    DiagramShapeKind.PROCESS -> RoundedCornerShape(6.dp)
+    DiagramShapeKind.START -> RoundedCornerShape(50)
+    DiagramShapeKind.END -> RoundedCornerShape(50)
+    DiagramShapeKind.PROCESS -> RoundedCornerShape(5.dp)
     DiagramShapeKind.IO -> parallelogramShape
     DiagramShapeKind.DECISION -> diamondShape
     DiagramShapeKind.SUBROUTINE -> RoundedCornerShape(2.dp)
+    DiagramShapeKind.CONNECTOR -> CircleShape
     DiagramShapeKind.CIRCLE -> CircleShape
     DiagramShapeKind.OVAL -> RoundedCornerShape(50)
-    DiagramShapeKind.RECTANGLE -> RoundedCornerShape(4.dp)
+    DiagramShapeKind.RECTANGLE -> RoundedCornerShape(14.dp)
     DiagramShapeKind.DIAMOND -> diamondShape
 }
+
+/** True for shapes that get the DIN "double vertical stripe" subroutine decoration. */
+fun hasSubroutineStripes(kind: DiagramShapeKind): Boolean = kind == DiagramShapeKind.SUBROUTINE
