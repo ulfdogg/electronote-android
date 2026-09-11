@@ -23,8 +23,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CloudQueue
+import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
@@ -99,6 +101,8 @@ fun DocumentListScreen(
     var refreshKey by remember { mutableStateOf(0) }
     var showNextcloudLogin by remember { mutableStateOf(false) }
     var showNextcloudDownload by remember { mutableStateOf(false) }
+    var showDriveLogin by remember { mutableStateOf(false) }
+    var showDriveDownload by remember { mutableStateOf(false) }
     var selectedTag by remember { mutableStateOf<String?>(null) }
     var editingTagsFor by remember { mutableStateOf<NotebookDocumentSummary?>(null) }
     var isImportingPdf by remember { mutableStateOf(false) }
@@ -185,6 +189,12 @@ fun DocumentListScreen(
                 }
                 IconButton(onClick = { showNextcloudLogin = true }) {
                     Icon(Icons.Outlined.CloudQueue, contentDescription = "Nextcloud", modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = { showDriveDownload = true }) {
+                    Icon(Icons.Outlined.CloudSync, contentDescription = "Von Google Drive laden", modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = { showDriveLogin = true }) {
+                    Icon(Icons.Outlined.Cloud, contentDescription = "Google Drive", modifier = Modifier.size(20.dp))
                 }
                 IconButton(onClick = { AppPreferences.toggleDarkMode(context) }) {
                     Icon(
@@ -331,6 +341,15 @@ fun DocumentListScreen(
     if (showNextcloudDownload) {
         NextcloudDownloadDialog(
             onDismiss = { showNextcloudDownload = false },
+            onDownloaded = { refreshKey++ }
+        )
+    }
+    if (showDriveLogin) {
+        de.graetz.electronote.drive.GoogleDriveLoginDialog(onDismiss = { showDriveLogin = false })
+    }
+    if (showDriveDownload) {
+        de.graetz.electronote.drive.GoogleDriveDownloadDialog(
+            onDismiss = { showDriveDownload = false },
             onDownloaded = { refreshKey++ }
         )
     }

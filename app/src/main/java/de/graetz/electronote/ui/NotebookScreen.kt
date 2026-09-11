@@ -462,6 +462,27 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
         }
     }
 
+    fun uploadToGoogleDrive() {
+        val doc = document ?: return
+        val account = de.graetz.electronote.drive.GoogleDriveAuth.lastAccount(context)
+        if (account == null) {
+            Toast.makeText(context, "Bitte zuerst in der Notizbuch-Liste mit Google Drive verbinden", Toast.LENGTH_LONG).show()
+            return
+        }
+        syncDocumentFromCanvas()
+        scope.launch {
+            val success = withContext(Dispatchers.IO) {
+                val token = de.graetz.electronote.drive.GoogleDriveAuth.getAccessToken(context, account) ?: return@withContext false
+                de.graetz.electronote.drive.GoogleDriveSync.upload(context, token, doc)
+            }
+            Toast.makeText(
+                context,
+                if (success) "Auf Google Drive gespeichert" else "Hochladen fehlgeschlagen",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
     // Teilen: renders the current document to a PDF in the app's cache dir and hands it
     // to the native Android share sheet (Mail/WhatsApp/Nearby Share/…), unlike the
     // "Exportieren" pill which saves to a location the user picks (Drive, Nextcloud, …).
@@ -929,6 +950,11 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             DropdownMenuItem(
                                 text = { Text("Symbol / ClipArt…") },
                                 onClick = { showMoreMenu = false; showStickerPicker = true }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Google Drive hochladen") },
+                                onClick = { showMoreMenu = false; uploadToGoogleDrive() }
                             )
                             HorizontalDivider()
                             DropdownMenuItem(

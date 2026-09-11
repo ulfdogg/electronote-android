@@ -12,8 +12,8 @@ android {
         applicationId = "de.graetz.electronote"
         minSdk = 26
         targetSdk = 34
-        versionCode = 19
-        versionName = "0.14.0"
+        versionCode = 20
+        versionName = "0.15.0"
     }
 
     signingConfigs {
@@ -62,6 +62,7 @@ dependencies {
     implementation("androidx.browser:browser:1.8.0")
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
     implementation("com.google.zxing:core:3.5.4")
     implementation("androidx.security:security-crypto:1.1.0")
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))

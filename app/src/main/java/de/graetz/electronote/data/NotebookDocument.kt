@@ -29,6 +29,9 @@ data class NotebookDocument(
     // Set once this document has been uploaded to/downloaded from Nextcloud, so later
     // uploads always land in the same remote folder instead of creating duplicates.
     var remoteFolderName: String? = null,
+    // Google Drive addresses by folder ID, not path, so this is tracked separately from
+    // remoteFolderName (which is Nextcloud's WebDAV path-based folder name).
+    var driveFolderId: String? = null,
     var strokes: MutableList<Stroke> = mutableListOf(),
     var backgrounds: MutableList<PageBackground> = mutableListOf(),
     var textElements: MutableList<TextElement> = mutableListOf(),
@@ -58,6 +61,7 @@ data class NotebookDocument(
         obj.put("paperStyle", paperStyle.name)
         obj.put("lineSpacing", lineSpacing.name)
         obj.put("remoteFolderName", remoteFolderName ?: JSONObject.NULL)
+        obj.put("driveFolderId", driveFolderId ?: JSONObject.NULL)
 
         val strokesArr = JSONArray()
         for (stroke in strokes) {
@@ -174,6 +178,11 @@ data class NotebookDocument(
                 lineSpacing = lineSpacing,
                 remoteFolderName = if (obj.has("remoteFolderName") && !obj.isNull("remoteFolderName")) {
                     obj.getString("remoteFolderName")
+                } else {
+                    null
+                },
+                driveFolderId = if (obj.has("driveFolderId") && !obj.isNull("driveFolderId")) {
+                    obj.getString("driveFolderId")
                 } else {
                     null
                 },
