@@ -1226,7 +1226,18 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .horizontalScroll(whiteboardHScrollState)
+                    // horizontalScroll gives its content an unbounded max-width constraint,
+                    // under which Modifier.fillMaxWidth() resolves to 0dp — only opt into it
+                    // for whiteboards (fixed wide canvas, canvasWidthOverridePx != null).
+                    // Applying it unconditionally made every ordinary notebook's InkCanvasView
+                    // render at 0 width (invisible: no paper pattern, no ink, nothing).
+                    .then(
+                        if (controller.canvasWidthOverridePx != null) {
+                            Modifier.horizontalScroll(whiteboardHScrollState)
+                        } else {
+                            Modifier
+                        }
+                    )
                     .verticalScroll(scrollState)
             ) {
                 if (!isLoading && document != null) {
