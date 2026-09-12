@@ -320,6 +320,12 @@ class InkCanvasView @JvmOverloads constructor(
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // Without this, a Compose ancestor's vertical scroll (the notebook page
+                // sits inside Modifier.verticalScroll) can steal an in-progress stroke
+                // mid-gesture on real, slightly-diagonal pen/finger movement — synthetic
+                // straight-line test swipes never trigger it, which is why this only
+                // surfaced as "nothing gets drawn" on real handwriting.
+                parent?.requestDisallowInterceptTouchEvent(true)
                 activePointerId = event.getPointerId(0)
                 currentPoints = mutableListOf(pointFrom(event, 0))
                 invalidate()
@@ -350,10 +356,12 @@ class InkCanvasView @JvmOverloads constructor(
                 return true
             }
             MotionEvent.ACTION_UP -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
                 finishStroke()
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
                 currentPoints = null
                 invalidate()
                 return true
@@ -386,12 +394,14 @@ class InkCanvasView @JvmOverloads constructor(
     private fun handleEraserTouch(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
                 lastEraserPoint = StrokePoint(event.x, event.y)
                 eraseNear(event.x, event.y)
                 invalidate()
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
                 lastEraserPoint = null
                 invalidate()
                 return true
@@ -452,6 +462,7 @@ class InkCanvasView @JvmOverloads constructor(
     private fun handleSelectionTouch(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
                 selectionPoints = mutableListOf(pointFrom(event, 0))
                 invalidate()
                 return true
@@ -463,6 +474,7 @@ class InkCanvasView @JvmOverloads constructor(
                 return true
             }
             MotionEvent.ACTION_UP -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
                 val pts = selectionPoints
                 selectionPoints = null
                 val box = pts?.let { boundingBox(it) }
@@ -475,6 +487,7 @@ class InkCanvasView @JvmOverloads constructor(
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
                 selectionPoints = null
                 onSelectionCancelled?.invoke()
                 invalidate()
@@ -542,8 +555,13 @@ class InkCanvasView @JvmOverloads constructor(
         if (paperStyle == PaperStyle.BLANK) return
         val clip = Rect()
         val hasClip = canvas.getClipBounds(clip)
-        val top = if (hasClip) max(0, clip.top) else 0
-        val bottom = if (hasClip) min(height, clip.bottom) else height
+        // getClipBounds() has been observed returning a degenerate/empty rect on some
+        // GPU drivers for tall, mostly off-screen custom Views (the paper pattern would
+        // then silently render nothing at all, on every draw). Fall back to the view's
+        // full bounds whenever the reported clip isn't a sane, non-empty range.
+        val clipIsUsable = hasClip && clip.top < clip.bottom && clip.bottom > 0
+        val top = if (clipIsUsable) max(0, clip.top) else 0
+        val bottom = if (clipIsUsable) min(height, clip.bottom) else height
         val right = width.toFloat()
 
         when (paperStyle) {
