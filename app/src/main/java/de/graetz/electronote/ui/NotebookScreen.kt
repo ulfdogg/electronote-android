@@ -101,6 +101,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -111,8 +112,7 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScanner
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
-import de.graetz.electronote.ai.AiProvider
-import de.graetz.electronote.ai.openAiProvider
+import de.graetz.electronote.ai.AiSidebarPanel
 import de.graetz.electronote.canvas.Bookmark
 import de.graetz.electronote.canvas.DrawTool
 import de.graetz.electronote.canvas.ImageElement
@@ -185,6 +185,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     val controller = remember { InkCanvasController() }
     val scrollState = rememberScrollState()
     val whiteboardHScrollState = rememberScrollState()
+    var viewportSizePx by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
 
     var document by remember { mutableStateOf<NotebookDocument?>(null) }
     var isLoading by remember { mutableStateOf(true) }
@@ -280,6 +281,61 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             }
         }
         return parts.filter { it.isNotBlank() }.joinToString(" ")
+    }
+
+    // "Seite kopieren" (KI-Assistent): mirrors iOS's collectContextText — only the
+    // currently visible viewport, not the whole notebook, so long documents stay fast and
+    // the AI gets exactly the page the user is looking at right now.
+    suspend fun collectContextTextForAi(): String {
+        val doc = document ?: return ""
+        val viewportHeight = viewportSizePx.height.takeIf { it > 0 } ?: 1000
+        val viewportWidth = viewportSizePx.width.takeIf { it > 0 } ?: (controller.canvasWidthPx.takeIf { it > 0 } ?: 1600)
+        val visible = RectF(0f, scrollState.value.toFloat(), viewportWidth.toFloat(), scrollState.value.toFloat() + viewportHeight.toFloat())
+
+        val parts = mutableListOf<String>()
+        for (note in doc.stickyNotes) {
+            val noteRect = RectF(note.x, note.y, note.x + STICKY_NOTE_SIZE_PX, note.y + STICKY_NOTE_SIZE_PX)
+            if (RectF.intersects(noteRect, visible) && note.text.isNotBlank()) {
+                parts.add("📌 [Haftzettel]:\n${note.text}")
+            }
+        }
+        for (t in doc.textElements) {
+            val tRect = RectF(t.x - 12f, t.y - 12f, t.x + 340f, t.y + 110f)
+            if (RectF.intersects(tRect, visible) && t.text.isNotBlank()) {
+                parts.add("✍️ [Text]:\n${t.text}")
+            }
+        }
+
+        val bitmap = withContext(Dispatchers.Main) { controller.captureRegion(visible) }
+        if (bitmap != null) {
+            try {
+                val ocrText = HandwritingRecognizer.recognize(bitmap)
+                if (ocrText.isNotBlank()) parts.add("✍️ [Handschrift/Bildtext auf dieser Seite]:\n$ocrText")
+            } catch (e: Exception) {
+                // No recognizable content — the typed text/sticky notes above still count.
+            } finally {
+                bitmap.recycle()
+            }
+        }
+
+        // Fallback: an empty/blank viewport still has content elsewhere in the document
+        // worth sending, same as iOS's own fallback.
+        if (parts.isEmpty()) {
+            for (t in doc.textElements) if (t.text.isNotBlank()) parts.add("✍️ [Text]:\n${t.text}")
+            for (note in doc.stickyNotes) if (note.text.isNotBlank()) parts.add("📌 [Haftzettel]:\n${note.text}")
+        }
+
+        return parts.joinToString("\n\n")
+    }
+
+    // "Screenshot" (KI-Assistent): everything currently on screen (paper, images, ink,
+    // text, sticky notes), so the AI can actually see diagrams/sketches that OCR alone
+    // would miss — see InkCanvasView.captureVisibleScreenshot.
+    fun captureCurrentPageScreenshot(): Bitmap? {
+        val viewportHeight = viewportSizePx.height.takeIf { it > 0 } ?: return null
+        val viewportWidth = viewportSizePx.width.takeIf { it > 0 } ?: return null
+        val visible = RectF(0f, scrollState.value.toFloat(), viewportWidth.toFloat(), scrollState.value.toFloat() + viewportHeight.toFloat())
+        return controller.captureVisibleScreenshot(visible)
     }
 
     fun saveAndIndexThenBack() {
@@ -795,7 +851,7 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
     var selectedWidthPx by remember { mutableStateOf(STROKE_WIDTHS[1]) }
     var paperStyle by remember { mutableStateOf(PaperStyle.LINED) }
     var selectedLineSpacing by remember { mutableStateOf(LineSpacing.MEDIUM) }
-    var showAiMenu by remember { mutableStateOf(false) }
+    var showAiSidebar by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var showInsertMenu by remember { mutableStateOf(false) }
     var showPaperDialog by remember { mutableStateOf(false) }
@@ -880,21 +936,13 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    Box {
-                        IconButton(onClick = { showAiMenu = true }) {
-                            Icon(Icons.Outlined.SmartToy, contentDescription = "KI-Assistent", modifier = Modifier.size(20.dp))
-                        }
-                        DropdownMenu(expanded = showAiMenu, onDismissRequest = { showAiMenu = false }) {
-                            for (provider in AiProvider.entries) {
-                                DropdownMenuItem(
-                                    text = { Text(provider.label) },
-                                    onClick = {
-                                        showAiMenu = false
-                                        openAiProvider(context, provider)
-                                    }
-                                )
-                            }
-                        }
+                    IconButton(onClick = { showAiSidebar = !showAiSidebar }) {
+                        Icon(
+                            Icons.Outlined.SmartToy,
+                            contentDescription = if (showAiSidebar) "KI-Assistent schließen" else "KI-Assistent öffnen",
+                            tint = if (showAiSidebar) IosColors.Purple else LocalContentColor.current,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                     Box {
                         ActionPill(
@@ -1163,10 +1211,10 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
             }
         }
     ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
         ) {
             if (showSidebar) {
                 Column(
@@ -1226,6 +1274,11 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
+                    // Captured before the scroll modifiers below so it reflects the Box's
+                    // own constrained viewport size, not the (taller/wider) scrollable
+                    // content — used to compute what's actually visible on screen for the
+                    // AI assistant's "Seite kopieren"/"Screenshot" quick actions.
+                    .onSizeChanged { viewportSizePx = it }
                     // horizontalScroll gives its content an unbounded max-width constraint,
                     // under which Modifier.fillMaxWidth() resolves to 0dp — only opt into it
                     // for whiteboards (fixed wide canvas, canvasWidthOverridePx != null).
@@ -1244,6 +1297,16 @@ fun NotebookScreen(documentId: String, onBack: () -> Unit) {
                     InkCanvas(controller = controller, modifier = Modifier.fillMaxWidth())
                 }
             }
+        }
+
+        if (showAiSidebar) {
+            AiSidebarPanel(
+                onClose = { showAiSidebar = false },
+                onCollectContextText = { collectContextTextForAi() },
+                onCaptureScreenshot = { captureCurrentPageScreenshot() },
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
+        }
         }
     }
 

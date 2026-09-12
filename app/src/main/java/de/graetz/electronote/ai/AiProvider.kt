@@ -3,11 +3,12 @@ package de.graetz.electronote.ai
 import android.content.Context
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.ui.graphics.Color
 
-enum class AiProvider(val label: String, val url: String) {
-    ChatGPT("ChatGPT", "https://chatgpt.com"),
-    Claude("Claude", "https://claude.ai/new"),
-    Gemini("Gemini", "https://gemini.google.com/app")
+enum class AiProvider(val label: String, val url: String, val brandColor: Color) {
+    ChatGPT("ChatGPT", "https://chatgpt.com", Color(0xFF10A37F)),
+    Claude("Claude", "https://claude.ai/new", Color(0xFFD97757)),
+    Gemini("Gemini", "https://gemini.google.com/app", Color(0xFF4285F4))
 }
 
 /**
@@ -17,9 +18,11 @@ enum class AiProvider(val label: String, val url: String) {
  * normally, including for accounts that only ever registered via Google. Same reasoning
  * as using SFSafariViewController instead of WKWebView on iOS.
  */
-fun openAiProvider(context: Context, provider: AiProvider) {
+fun openUrlInBrowser(context: Context, url: String) {
     CustomTabsIntent.Builder()
         .setShowTitle(true)
         .build()
-        .launchUrl(context, Uri.parse(provider.url))
+        .launchUrl(context, Uri.parse(url))
 }
+
+fun openAiProvider(context: Context, provider: AiProvider) = openUrlInBrowser(context, provider.url)

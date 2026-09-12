@@ -245,9 +245,12 @@ class InkCanvasView @JvmOverloads constructor(
         onStrokesChanged?.invoke(strokes.isNotEmpty(), redoStack.isNotEmpty())
     }
 
+    private var canvasBackgroundColorInt: Int = Color.WHITE
+
     /** Dark paper, matching the iPad app's "Dunkles Papier" toggle. */
     fun setDarkPaper(dark: Boolean) {
-        setBackgroundColor(if (dark) Color.parseColor("#1C1C1E") else Color.WHITE)
+        canvasBackgroundColorInt = if (dark) Color.parseColor("#1C1C1E") else Color.WHITE
+        setBackgroundColor(canvasBackgroundColorInt)
         gridPaint.color = if (dark) Color.parseColor("#3A3A3C") else Color.parseColor("#DADCE0")
         dotPaint.color = if (dark) Color.parseColor("#48484A") else Color.parseColor("#C6C9CE")
         invalidate()
@@ -617,16 +620,15 @@ class InkCanvasView @JvmOverloads constructor(
         }
     }
 
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-
+    /** Everything that's actually part of the page (paper pattern, backgrounds, ink,
+     * images, text, sticky notes) — shared between live rendering and
+     * [captureVisibleScreenshot], which needs the same output minus the transient
+     * editing overlays (in-progress stroke, eraser cursor, OCR selection marquee). */
+    private fun drawPageContent(canvas: Canvas) {
         drawPaperPattern(canvas)
         drawBackgroundLayers(canvas)
 
         for (stroke in strokes) canvas.drawStroke(stroke)
-        currentPoints?.let {
-            canvas.drawStroke(Stroke(it, colorForCurrentTool(), widthForCurrentTool()))
-        }
 
         for ((img, bmp) in imageElements) {
             val dst = RectF(img.x, img.y, img.x + img.widthPx, img.y + img.heightPx)
@@ -651,6 +653,16 @@ class InkCanvasView @JvmOverloads constructor(
 
         for (text in textElements) canvas.drawTextElement(text)
         for (sticky in stickyNotes) canvas.drawStickyNote(sticky)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+
+        drawPageContent(canvas)
+
+        currentPoints?.let {
+            canvas.drawStroke(Stroke(it, colorForCurrentTool(), widthForCurrentTool()))
+        }
 
         lastEraserPoint?.let { p ->
             canvas.drawCircle(p.x, p.y, ERASER_RADIUS_PX, eraserPreviewPaint)
@@ -665,5 +677,39 @@ class InkCanvasView @JvmOverloads constructor(
                 canvas.drawPath(path, selectionStrokePaint)
             }
         }
+    }
+
+    /**
+     * Renders the actual page content (paper pattern, images, ink, text, sticky notes —
+     * everything [drawPageContent] draws) cropped to [visibleRect], for handing to the AI
+     * assistant as a "what's currently on screen" screenshot. Unlike [captureRegion] (used
+     * for OCR, which only needs backgrounds+ink), this includes everything a human looking
+     * at the screen would see.
+     */
+    fun captureVisibleScreenshot(visibleRect: RectF, paddingPx: Float = 0f): Bitmap? {
+        if (width <= 0 || height <= 0) return null
+
+        val full = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val fullCanvas = Canvas(full)
+        fullCanvas.drawColor(canvasBackgroundColorInt)
+        drawPageContent(fullCanvas)
+
+        val left = (visibleRect.left - paddingPx).coerceIn(0f, width.toFloat())
+        val top = (visibleRect.top - paddingPx).coerceIn(0f, height.toFloat())
+        val right = (visibleRect.right + paddingPx).coerceIn(0f, width.toFloat())
+        val bottom = (visibleRect.bottom + paddingPx).coerceIn(0f, height.toFloat())
+
+        val x = left.toInt()
+        val y = top.toInt()
+        val w = (right - left).toInt().coerceAtLeast(1)
+        val h = (bottom - top).toInt().coerceAtLeast(1)
+        if (x + w > full.width || y + h > full.height) {
+            full.recycle()
+            return null
+        }
+
+        val cropped = Bitmap.createBitmap(full, x, y, w, h)
+        full.recycle()
+        return cropped
     }
 }

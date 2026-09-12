@@ -122,6 +122,7 @@ class InkCanvasController {
     fun stopSelection() { view?.selectionModeActive = false }
 
     fun captureRegion(rect: RectF): Bitmap? = view?.captureRegion(rect)
+    fun captureVisibleScreenshot(rect: RectF): Bitmap? = view?.captureVisibleScreenshot(rect)
 }
 
 @Composable
